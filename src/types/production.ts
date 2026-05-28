@@ -8,6 +8,7 @@ export interface LineData {
   productCode: string;
   plannedMembers: number;
   hourlyTarget: number;
+  orderTotalProducts?: number;
 }
 
 export interface MachineData {
@@ -28,4 +29,15 @@ export interface TableRow {
   plannedMembers: number;
   hourlyTarget: number;
   hourlyData: Record<string, number>;
+}
+export interface LineData {
+  machineId: string;
+
+  productCode: string;
+
+  plannedMembers: number;
+
+  hourlyTarget: number;
+
+  orderTotalProducts?: number;
 }

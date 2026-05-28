@@ -1,447 +1,494 @@
-import {
-  useEffect,
-  useState,
-} from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import type {
+  AnalyticsFilters as AnalyticsFiltersType,
+  CounterHistoryPoint,
+  FloorName,
+  Granularity,
+  LineRecord,
+  MachineRecord,
+} from "../types/analytics";
+
+import { FLOORS } from "../constants/floors";
 
 import {
-  ref,
-  onValue,
-} from "firebase/database";
+  listenFloorLines,
+  listenFloorMachines,
+  listenMachineHistory,
+  computeRealtimeStatus,
+} from "../services/analytics";
 
-import { database } from "../services/firebase";
+import {
+  filterHistoryByRange,
+  calculateCycleTimeStats,
+  buildHeatmap,
+  summarizePatterns,
+} from "../utils/analyticsHelpers";
 
-import AnalyticsOverviewCard from "../components/dashboard/AnalyticsOverviewCard";
+import AnalyticsFilters from "../components/dashboard/analytics/AnalyticsFilters";
 
-import RealtimeLineCard from "../components/dashboard/RealtimeLineCard";
+import AnalyticsMetrics from "../components/dashboard/analytics/AnalyticsMetrics";
 
-interface LineData {
-  machineId: string;
-  productCode: string;
-  hourlyTarget: number;
+import AnalyticsCharts from "../components/dashboard/analytics/AnalyticsCharts";
+
+import AnalyticsHeatmap from "../components/dashboard/analytics/AnalyticsHeatmap";
+
+import RealtimeStatusPanel from "../components/dashboard/analytics/RealtimeStatusPanel";
+
+// ===============================================
+// FLOOR OPTIONS
+// ===============================================
+
+const floorOptions: FloorName[] = ["Combined", ...(FLOORS as FloorName[])];
+
+// ===============================================
+// FORMAT DATE
+// ===============================================
+
+function formatDateInput(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
-interface CounterHistoryItem {
-  Count: number;
-  Time: string;
-  Interval: number;
+// ===============================================
+// DEFAULT DATES
+// ===============================================
+
+const defaultEndDate = formatDateInput(new Date());
+
+const defaultStartDate = formatDateInput(
+  new Date(Date.now() - 6 * 24 * 60 * 60 * 1000),
+);
+
+// ===============================================
+// GRANULARITY SCALE
+// ===============================================
+
+const granularityScale: Record<Granularity, number> = {
+  daily: 24,
+
+  weekly: 24 * 7,
+
+  monthly: 24 * 30,
+};
+
+// ===============================================
+// LINE META
+// ===============================================
+
+interface LineMeta extends LineRecord {
+  key: string;
+
+  floor: FloorName;
+
+  label: string;
 }
 
-interface ChartDataItem {
-  time: string;
-  output: number;
-  interval: number;
-}
-
-interface LineRealtimeData {
-  current: number;
-  status: string;
-  chartData: ChartDataItem[];
-}
+// ===============================================
+// ANALYTICS PAGE
+// ===============================================
 
 export default function Analytics() {
-  // =========================
+  // ===========================================
   // STATES
-  // =========================
+  // ===========================================
 
-  const [lines, setLines] =
-    useState<
-      Record<string, LineData>
-    >({});
+  const [filters, setFilters] = useState<AnalyticsFiltersType>({
+    floor: "Combined",
 
-  const [lineRealtimeData, setLineRealtimeData] =
-    useState<
-      Record<
-        string,
-        LineRealtimeData
-      >
-    >({});
+    startDate: defaultStartDate,
 
-  const [selectedLine, setSelectedLine] =
-    useState<string | null>(
-      null
-    );
+    endDate: defaultEndDate,
 
-  // =========================
-  // LOAD LINES
-  // =========================
+    granularity: "daily",
+  });
 
-  useEffect(() => {
-    const linesRef = ref(
-      database,
-      "Lines"
-    );
+  const [,] = useState<string | null>(null);
 
-    const unsubscribe = onValue(
-      linesRef,
-      (snapshot) => {
-        if (
-          snapshot.exists()
-        ) {
-          setLines(
-            snapshot.val()
-          );
-        }
-      }
-    );
+  const [,] = useState<string | null>(null);
 
-    return () => unsubscribe();
-  }, []);
+  const [linesByFloor, setLinesByFloor] = useState<
+    Record<FloorName, Record<string, LineRecord>>
+  >({
+    Combined: {},
 
-  // =========================
-  // LOAD MACHINE DATA
-  // =========================
+    Manufacturing_Floor: {},
+
+    Assembly_Floor: {},
+  });
+
+  const [machinesByFloor, setMachinesByFloor] = useState<
+    Record<FloorName, Record<string, MachineRecord>>
+  >({
+    Combined: {},
+
+    Manufacturing_Floor: {},
+
+    Assembly_Floor: {},
+  });
+
+  const [historyByMachine, setHistoryByMachine] = useState<
+    Record<string, CounterHistoryPoint[]>
+  >({});
+
+  // ===========================================
+  // LISTEN LINES
+  // ===========================================
 
   useEffect(() => {
-    const unsubscribers:
-      (() => void)[] = [];
+    const unsubscribeLines = listenFloorLines(
+      (lines: Record<string, LineRecord>) => {
+        setLinesByFloor({
+          Combined: lines,
 
-    Object.entries(lines).forEach(
-      ([lineKey, line]) => {
-        const machineId =
-          line.machineId;
+          Manufacturing_Floor: lines,
 
-        // =========================
-        // LIVE STATUS
-        // =========================
+          Assembly_Floor: lines,
+        });
+      },
+    );
 
-        const liveRef = ref(
-          database,
-          `Machines/${machineId}/LiveStatus`
-        );
+    const unsubscribeMachines = listenFloorMachines(
+      (machines: Record<string, MachineRecord>) => {
+        setMachinesByFloor({
+          Combined: machines,
 
-        const unsubscribeLive =
-          onValue(
-            liveRef,
-            (snapshot) => {
-              const current =
-                snapshot.exists()
-                  ? snapshot.val()
-                      .Count || 0
-                  : 0;
+          Manufacturing_Floor: machines,
 
-              setLineRealtimeData(
-                (
-                  prev
-                ) => ({
-                  ...prev,
-
-                  [lineKey]:
-                    {
-                      ...prev[
-                        lineKey
-                      ],
-
-                      current,
-                    },
-                })
-              );
-            }
-          );
-
-        unsubscribers.push(
-          unsubscribeLive
-        );
-
-        // =========================
-        // HEARTBEAT
-        // =========================
-
-        const heartbeatRef = ref(
-          database,
-          `Machines/${machineId}/heartbeat`
-        );
-
-        const unsubscribeHeartbeat =
-          onValue(
-            heartbeatRef,
-            (snapshot) => {
-              let status =
-                "offline";
-
-              if (
-                snapshot.exists()
-              ) {
-                const heartbeat =
-                  snapshot.val();
-
-                const now =
-                  Math.floor(
-                    Date.now() /
-                      1000
-                  );
-
-                const difference =
-                  now -
-                  heartbeat;
-
-                if (
-                  difference <=
-                  15
-                ) {
-                  status =
-                    "online";
-                }
-              }
-
-              setLineRealtimeData(
-                (
-                  prev
-                ) => ({
-                  ...prev,
-
-                  [lineKey]:
-                    {
-                      ...prev[
-                        lineKey
-                      ],
-
-                      status,
-                    },
-                })
-              );
-            }
-          );
-
-        unsubscribers.push(
-          unsubscribeHeartbeat
-        );
-
-        // =========================
-        // COUNTER HISTORY
-        // =========================
-
-        const historyRef = ref(
-          database,
-          `Machines/${machineId}/CounterHistory`
-        );
-
-        const unsubscribeHistory =
-          onValue(
-            historyRef,
-            (snapshot) => {
-              const chartData: ChartDataItem[] =
-                [];
-
-              if (
-                snapshot.exists()
-              ) {
-                const history =
-                  snapshot.val();
-
-                Object.values(
-                  history as Record<
-                    string,
-                    CounterHistoryItem
-                  >
-                )
-                  .slice(-30)
-                  .forEach(
-                    (
-                      item
-                    ) => {
-                      const time =
-                        item.Time?.split(
-                          " "
-                        )[1] ||
-                        "";
-
-                      chartData.push(
-                        {
-                          time,
-
-                          output:
-                            item.Count ||
-                            0,
-
-                          interval:
-                            Number(
-                              item.Interval
-                            ) ||
-                            0,
-                        }
-                      );
-                    }
-                  );
-              }
-
-              setLineRealtimeData(
-                (
-                  prev
-                ) => ({
-                  ...prev,
-
-                  [lineKey]:
-                    {
-                      ...prev[
-                        lineKey
-                      ],
-
-                      chartData,
-                    },
-                })
-              );
-            }
-          );
-
-        unsubscribers.push(
-          unsubscribeHistory
-        );
-      }
+          Assembly_Floor: machines,
+        });
+      },
     );
 
     return () => {
-      unsubscribers.forEach(
-        (
-          unsubscribe
-        ) =>
-          unsubscribe()
-      );
+      unsubscribeLines();
+
+      unsubscribeMachines();
     };
-  }, [lines]);
+  }, []);
 
-  // =========================
+  // ===========================================
+  // NORMALIZED LINES
+  // ===========================================
+
+  const normalizedLines = useMemo<LineMeta[]>(() => {
+    const build = (
+      floor: FloorName,
+
+      lines: Record<string, LineRecord>,
+    ) =>
+      Object.entries(lines).map(([lineKey, line]) => ({
+        ...line,
+
+        key: `${floor}/${lineKey}`,
+
+        floor,
+
+        label: `${floor.replace("_", " ")} ${lineKey.replace("_", " ")}`,
+      }));
+
+    if (filters.floor === "Combined") {
+      return [
+        ...build("Manufacturing_Floor", linesByFloor.Manufacturing_Floor),
+
+        ...build("Assembly_Floor", linesByFloor.Assembly_Floor),
+      ];
+    }
+
+    return build(
+      filters.floor,
+
+      linesByFloor[filters.floor],
+    );
+  }, [filters.floor, linesByFloor]);
+
+  // ===========================================
+  // OPTIONS
+  // ===========================================
+
+  const lineOptions = useMemo(
+    () =>
+      normalizedLines.map((line) => ({
+        value: line.key,
+
+        label: line.label,
+      })),
+
+    [normalizedLines],
+  );
+
+  const machineOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(normalizedLines.map((line) => line.machineId).sort()),
+      ).map((machineId) => ({
+        value: machineId,
+
+        label: machineId,
+      })),
+
+    [normalizedLines],
+  );
+
+  const productOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          normalizedLines.map((line) => line.productCode).filter(Boolean),
+        ),
+      ).map((product) => ({
+        value: product,
+
+        label: product,
+      })),
+
+    [normalizedLines],
+  );
+
+  // ===========================================
   // SELECTED LINE
-  // =========================
+  // ===========================================
 
-  const selectedLineData =
-    selectedLine
-      ? lines[selectedLine]
-      : null;
+  // ===========================================
+  // COMBINED DATA
+  // ===========================================
 
-  const selectedRealtime =
-    selectedLine
-      ? lineRealtimeData[
-          selectedLine
-        ]
-      : null;
+  const combinedLineRecords = useMemo(
+    () => ({
+      ...linesByFloor.Manufacturing_Floor,
 
-  // =========================
-  // PAGE
-  // =========================
+      ...linesByFloor.Assembly_Floor,
+    }),
+
+    [linesByFloor],
+  );
+
+  const combinedMachineRecords = useMemo(
+    () => ({
+      ...machinesByFloor.Manufacturing_Floor,
+
+      ...machinesByFloor.Assembly_Floor,
+    }),
+
+    [machinesByFloor],
+  );
+
+  // ===========================================
+  // MACHINE LISTENERS
+  // ===========================================
+
+  const machineHistoryListeners = useMemo(
+    () =>
+      normalizedLines.map((line) => ({
+        floor: line.floor,
+
+        machineId: line.machineId,
+      })),
+
+    [normalizedLines],
+  );
+
+  // ===========================================
+  // MACHINE HISTORY
+  // ===========================================
+
+  useEffect(() => {
+    const unsubscribes: (() => void)[] = [];
+
+    machineHistoryListeners.forEach((entry) => {
+      const historyKey = `${entry.floor}/${entry.machineId}`;
+
+      const unsubscribe = listenMachineHistory(
+        entry.machineId,
+
+        (history: Record<string, CounterHistoryPoint>) => {
+          setHistoryByMachine((prev) => ({
+            ...prev,
+
+            [historyKey]: (
+              Object.values(history) as CounterHistoryPoint[]
+            ).sort((a, b) => a.timestamp - b.timestamp),
+          }));
+        },
+      );
+
+      unsubscribes.push(unsubscribe);
+    });
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [machineHistoryListeners]);
+
+  // ===========================================
+  // FILTERED HISTORY
+  // ===========================================
+
+  const selectedRangeHistory = useMemo(() => {
+    const startTime = new Date(filters.startDate).setHours(0, 0, 0, 0);
+
+    const endTime = new Date(filters.endDate).setHours(23, 59, 59, 999);
+
+    return Object.entries(historyByMachine).flatMap(([historyKey, history]) => {
+      const line = normalizedLines.find(
+        (line) => `${line.floor}/${line.machineId}` === historyKey,
+      );
+
+      if (!line) {
+        return [];
+      }
+
+      if (filters.line && line.key !== filters.line) {
+        return [];
+      }
+
+      if (filters.machine && line.machineId !== filters.machine) {
+        return [];
+      }
+
+      if (filters.product && line.productCode !== filters.product) {
+        return [];
+      }
+
+      return filterHistoryByRange(history, startTime, endTime);
+    });
+  }, [filters, historyByMachine, normalizedLines]);
+
+  // ===========================================
+  // REALTIME STATUS
+  // ===========================================
+
+  const machineStatuses = computeRealtimeStatus(
+    filters.floor === "Combined"
+      ? combinedMachineRecords
+      : machinesByFloor[filters.floor],
+
+    filters.floor === "Combined"
+      ? combinedLineRecords
+      : linesByFloor[filters.floor],
+  );
+
+  // ===========================================
+  // ANALYTICS
+  // ===========================================
+
+  const cycleStats = calculateCycleTimeStats(selectedRangeHistory);
+
+  const hourlyIntensity = buildHeatmap(selectedRangeHistory);
+
+  const patternSummary = summarizePatterns(selectedRangeHistory);
+
+  const lineComparisonData = normalizedLines.map((line) => ({
+    label: line.label,
+
+    actual: selectedRangeHistory
+      .filter((item) => item.machineId === line.machineId)
+      .reduce((sum, item) => sum + item.count, 0),
+
+    target: line.hourlyTarget * granularityScale[filters.granularity],
+  }));
+
+  // ===========================================
+  // TOTALS
+  // ===========================================
+
+  const totalTarget =
+    normalizedLines.reduce((sum, line) => sum + line.hourlyTarget, 0) *
+    granularityScale[filters.granularity];
+
+  const totalOutput = selectedRangeHistory.reduce(
+    (sum, item) => sum + item.count,
+    0,
+  );
+
+  const completionRate =
+    totalTarget > 0 ? Math.round((totalOutput / totalTarget) * 100) : 0;
+
+  // ===========================================
+  // RENDER
+  // ===========================================
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] p-6">
-      {/* HEADER */}
-
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">
-          Production Analytics
+        <h1 className="text-3xl font-bold text-gray-900">
+          Enterprise Production Analytics
         </h1>
 
-        <p className="text-gray-500 mt-1">
-          Realtime production
-          monitoring and cycle
-          analysis
+        <p className="mt-2 text-gray-600">
+          Real-time production analytics dashboard
         </p>
       </div>
 
-      {/* ========================= */}
-      {/* OVERVIEW CARDS */}
-      {/* ========================= */}
+      <AnalyticsFilters
+        filters={filters}
+        floors={floorOptions}
+        lines={lineOptions}
+        machines={machineOptions}
+        products={productOptions}
+        onFilterChange={(patch) =>
+          setFilters((current) => ({
+            ...current,
+            ...patch,
+          }))
+        }
+      />
 
-      {!selectedLine && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {Object.entries(
-            lines
-          ).map(
-            (
-              [
-                lineKey,
-                line,
-              ]
-            ) => {
-              const realtime =
-                lineRealtimeData[
-                  lineKey
-                ];
+      <div className="mt-8">
+        <AnalyticsMetrics
+          totalOutput={totalOutput}
+          totalTarget={totalTarget}
+          completionRate={completionRate}
+          remaining={Math.max(totalTarget - totalOutput, 0)}
+          avgCycleTime={cycleStats.average}
+          onlineMachines={
+            machineStatuses.filter((status) => status.status === "online")
+              .length
+          }
+          offlineMachines={
+            machineStatuses.filter((status) => status.status === "offline")
+              .length
+          }
+        />
+      </div>
 
-              return (
-                <AnalyticsOverviewCard
-                  key={
-                    lineKey
-                  }
-                  line={lineKey.replace(
-                    "_",
-                    " "
-                  )}
-                  product={
-                    line.productCode
-                  }
-                  machine={
-                    line.machineId
-                  }
-                  output={
-                    realtime?.current ||
-                    0
-                  }
-                  target={
-                    line.hourlyTarget
-                  }
-                  status={
-                    realtime?.status ||
-                    "offline"
-                  }
-                  onClick={() =>
-                    setSelectedLine(
-                      lineKey
-                    )
-                  }
-                />
-              );
-            }
-          )}
-        </div>
-      )}
+      <div className="mt-8 grid gap-6 xl:grid-cols-[2fr_1fr]">
+        <AnalyticsCharts
+          productionTrend={[]}
+          cycleTimeTrend={[]}
+          lineComparison={lineComparisonData}
+          floorContribution={[]}
+          cycleTimeDistribution={[]}
+          hourlyIntensity={hourlyIntensity}
+        />
 
-      {/* ========================= */}
-      {/* DETAILED VIEW */}
-      {/* ========================= */}
+        <RealtimeStatusPanel statuses={machineStatuses} />
+      </div>
 
-      {selectedLine &&
-        selectedLineData &&
-        selectedRealtime && (
+      <div className="mt-8">
+        <AnalyticsHeatmap hourlyHeatmap={hourlyIntensity} />
+      </div>
+
+      <div className="mt-8 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-gray-900">
+          Production Patterns
+        </h2>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
           <div>
-            {/* BACK BUTTON */}
+            <p className="text-sm text-gray-500">Peak Hour</p>
 
-            <button
-              onClick={() =>
-                setSelectedLine(
-                  null
-                )
-              }
-              className="mb-6 bg-gray-800 text-white px-5 py-2 rounded-xl hover:bg-black transition-all"
-            >
-              ← Back to Lines
-            </button>
-
-            {/* REALTIME CARD */}
-
-            <RealtimeLineCard
-              line={selectedLine.replace(
-                "_",
-                " "
-              )}
-              product={
-                selectedLineData.productCode
-              }
-              machine={
-                selectedLineData.machineId
-              }
-              target={
-                selectedLineData.hourlyTarget
-              }
-              current={
-                selectedRealtime.current
-              }
-              status={
-                selectedRealtime.status
-              }
-              chartData={
-                selectedRealtime.chartData
-              }
-            />
+            <p className="text-lg font-semibold">
+              {patternSummary.peakHour || "N/A"}
+            </p>
           </div>
-        )}
+
+          <div>
+            <p className="text-sm text-gray-500">Slow Hour</p>
+
+            <p className="text-lg font-semibold">
+              {patternSummary.slowHour || "N/A"}
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

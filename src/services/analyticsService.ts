@@ -1,63 +1,296 @@
-import {
-  ref,
-  onValue,
-} from "firebase/database";
+
+import { ref, onValue } from "firebase/database";
 
 import { database } from "./firebase";
 
-import type { CycleHistoryItem } from "../types/analytics";
+import type {
+  CounterHistoryPoint,
+  LineRecord,
+  MachineRecord,
+  RealtimeMachineStatus,
+} from "../types/analytics";
 
-interface CounterHistoryItem {
-  Interval: number;
-  Time: string;
+// ===============================================
+// FIREBASE HISTORY ITEM TYPE
+// ===============================================
+
+type FirebaseHistoryItem = {
+  Count?: number | string;
+  Interval?: number | string;
+  Time?: string;
+  LineKey?: string;
+  Line?: string;
+  ProductCode?: string;
+  productCode?: string;
+};
+
+// ===============================================
+// PARSE TIMESTAMP
+// ===============================================
+
+function parseTimestamp(
+  timeString?: unknown
+): number {
+
+  if (
+    !timeString ||
+    typeof timeString !== "string"
+  ) {
+    return Date.now();
+  }
+
+  const [
+    datePart = "",
+    timePart = "00:00:00",
+  ] = String(timeString).split(" ");
+
+  const normalizedTime =
+    timePart.replace(/\./g, ":");
+
+  const iso =
+    `${datePart}T${normalizedTime}`;
+
+  const parsed =
+    Date.parse(iso);
+
+  return Number.isNaN(parsed)
+    ? Date.now()
+    : parsed;
 }
 
-export function listenCycleHistory(
-  machineId: string,
+// ===============================================
+// LISTEN LINES
+// ===============================================
+
+export function listenFloorLines(
   callback: (
-    data: CycleHistoryItem[]
-  ) => void
-) {
-  const historyRef = ref(
+    lines: Record<
+      string,
+      LineRecord
+    >
+  ) => void,
+): () => void {
+
+  // ESP DATABASE STRUCTURE
+
+  const linesRef = ref(
     database,
-    `Machines/${machineId}/CounterHistory`
+    "Lines"
   );
 
-  return onValue(
+  const unsubscribe = onValue(
+    linesRef,
+    (snapshot) => {
+
+      callback(
+        snapshot.exists()
+          ? (
+              snapshot.val() as Record<
+                string,
+                LineRecord
+              >
+            )
+          : {}
+      );
+    }
+  );
+
+  return () => unsubscribe();
+}
+
+// ===============================================
+// LISTEN MACHINES
+// ===============================================
+
+export function listenFloorMachines(
+  callback: (
+    machines: Record<
+      string,
+      MachineRecord
+    >
+  ) => void,
+): () => void {
+
+  // ESP DATABASE STRUCTURE
+
+  const machinesRef = ref(
+    database,
+    "Machines"
+  );
+
+  const unsubscribe = onValue(
+    machinesRef,
+    (snapshot) => {
+
+      callback(
+        snapshot.exists()
+          ? (
+              snapshot.val() as Record<
+                string,
+                MachineRecord
+              >
+            )
+          : {}
+      );
+    }
+  );
+
+  return () => unsubscribe();
+}
+
+// ===============================================
+// LISTEN MACHINE HISTORY
+// ===============================================
+
+export function listenMachineHistory(
+  machineId: string,
+
+  callback: (
+    history: Record<
+      string,
+      CounterHistoryPoint
+    >
+  ) => void,
+): () => void {
+
+  // ESP DATABASE STRUCTURE
+
+  const historyRef = ref(
+    database,
+    `Machines/${machineId}/CounterHistory`,
+  );
+
+  const unsubscribe = onValue(
     historyRef,
     (snapshot) => {
-      if (!snapshot.exists()) {
-        callback([]);
-        return;
-      }
 
-      const history =
-        snapshot.val();
+      const raw = snapshot.exists()
+        ? (
+            snapshot.val() as Record<
+              string,
+              FirebaseHistoryItem
+            >
+          )
+        : {};
 
-      const formattedData: CycleHistoryItem[] =
-        [];
+      const parsed: Record<
+        string,
+        CounterHistoryPoint
+      > = {};
 
-      Object.values(
-        history as Record<
-          string,
-          CounterHistoryItem
-        >
-      )
-        .slice(-20)
-        .forEach((item) => {
-          const time =
-            item.Time?.split(
-              " "
-            )[1] || "";
+      Object.entries(raw).forEach(
+        ([key, value]) => {
 
-          formattedData.push({
-            TimeLabel: time,
-            CycleTime:
-              item.Interval || 0,
-          });
-        });
+          const item =
+            value as FirebaseHistoryItem;
 
-      callback(formattedData);
+          parsed[key] = {
+            id: key,
+
+            lineKey:
+              item.LineKey ||
+              item.Line ||
+              "",
+
+            machineId,
+
+            productCode:
+              item.ProductCode ||
+              item.productCode ||
+              "",
+
+            timestamp:
+              parseTimestamp(
+                item.Time
+              ),
+
+            count:
+              Number(
+                item.Count
+              ) || 0,
+
+            interval:
+              Number(
+                item.Interval
+              ) || 0,
+          };
+        }
+      );
+
+      callback(parsed);
+    }
+  );
+
+  return () => unsubscribe();
+}
+
+// ===============================================
+// COMPUTE REALTIME STATUS
+// ===============================================
+
+export function computeRealtimeStatus(
+  machines: Record<
+    string,
+    MachineRecord
+  >,
+
+  lines: Record<
+    string,
+    LineRecord
+  >,
+): RealtimeMachineStatus[] {
+
+  const now =
+    Math.floor(
+      Date.now() / 1000
+    );
+
+  return Object.entries(lines).map(
+    ([lineKey, line]) => {
+
+      const machineInfo =
+        machines[
+          line.machineId
+        ] || {};
+
+      const heartbeat =
+        Number(
+          machineInfo.heartbeat || 0
+        );
+
+      const status =
+        heartbeat &&
+        now - heartbeat <= 15
+          ? "online"
+          : "offline";
+
+      const currentCount =
+        Number(
+          machineInfo
+            .LiveStatus?.Count || 0
+        );
+
+      const lastCycleTimeSec =
+        Number(
+          machineInfo
+            .LiveStatus?.Interval || 0
+        ) || undefined;
+
+      return {
+        lineKey,
+
+        machineId:
+          line.machineId,
+
+        status,
+
+        lastHeartbeat:
+          heartbeat || undefined,
+
+        currentCount,
+
+        lastCycleTimeSec,
+      };
     }
   );
 }

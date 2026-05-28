@@ -1,313 +1,249 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import {
-  ref,
-  set,
-} from "firebase/database";
-
-import {
-  Save,
-  Package,
-  Users,
-  Target,
-  Factory,
-  Cpu,
-} from "lucide-react";
+import { ref, onValue, remove, update } from "firebase/database";
 
 import { database } from "../../services/firebase";
 
-import LineSelector from "./LineSelector";
-import MachineSelector from "./MachineSelector";
+import ResetCountPanel from "./ResetCountPanel";
+
+import MaintenanceAlertPanel from "./MaintenanceAlertPanel";
+
+import EmergencyReassignmentPanel from "./EmergencyReassignmentPanel";
+
+import type { LineData } from "../../types/production";
+
+// ===============================================
+// COMPONENT
+// ===============================================
 
 export default function SupervisorForm() {
-  // =========================
+  // ===========================================
   // STATES
-  // =========================
+  // ===========================================
 
-  const [line, setLine] = useState("");
+  const [selectedFloor, setSelectedFloor] = useState("Manufacturing_Floor");
 
-  const [machineId, setMachineId] =
-    useState("");
+  const [lines, setLines] = useState<Record<string, LineData>>({});
 
-  const [productCode, setProductCode] =
-    useState("");
+  const [liveCounts, setLiveCounts] = useState<Record<string, number>>({});
 
-  const [plannedMembers, setPlannedMembers] =
-    useState<number | "">("");
+  // ===========================================
+  // LOAD DATA
+  // ===========================================
 
-  const [hourlyTarget, setHourlyTarget] =
-    useState<number | "">("");
+  useEffect(() => {
+    // =======================================
+    // LOAD LINES
+    // =======================================
 
-  const [loading, setLoading] =
-    useState(false);
+    const linesRef = ref(database, "Lines");
 
-  const [successMessage, setSuccessMessage] =
-    useState("");
+    const unsubscribeLines = onValue(
+      linesRef,
 
-  // =========================
-  // RESET FORM
-  // =========================
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setLines(snapshot.val() as Record<string, LineData>);
+        } else {
+          setLines({});
+        }
+      },
+    );
 
-  const resetForm = () => {
-    setLine("");
-    setMachineId("");
-    setProductCode("");
-    setPlannedMembers("");
-    setHourlyTarget("");
-  };
+    // =======================================
+    // LOAD MACHINES
+    // =======================================
 
-  // =========================
-  // SAVE DATA
-  // =========================
+    const machinesRef = ref(database, "Machines");
 
-  const handleSave = async () => {
-    if (
-      !line ||
-      !machineId ||
-      !productCode ||
-      !plannedMembers ||
-      !hourlyTarget
-    ) {
-      alert("Please fill all fields");
+    const unsubscribeMachines = onValue(
+      machinesRef,
+
+      (snapshot) => {
+        const counts: Record<string, number> = {};
+
+        if (snapshot.exists()) {
+          const machines = snapshot.val() as Record<
+            string,
+            {
+              LiveStatus?: {
+                Count?: number;
+              };
+            }
+          >;
+
+          Object.entries(machines).forEach(([machineKey, machine]) => {
+            counts[machineKey] = Number(machine?.LiveStatus?.Count || 0);
+          });
+        }
+
+        setLiveCounts(counts);
+      },
+    );
+
+    // =======================================
+    // CLEANUP
+    // =======================================
+
+    return () => {
+      unsubscribeLines();
+
+      unsubscribeMachines();
+    };
+  }, []);
+
+  // ===========================================
+  // CLEAR LINE ASSIGNMENT
+  // ===========================================
+
+  const handleClearLine = async (lineId: string, machineId: string) => {
+    const confirmed = window.confirm(`Clear ${lineId} assignment?`);
+
+    if (!confirmed) {
       return;
     }
 
     try {
-      setLoading(true);
+      // REMOVE LINE
 
-      // =========================
-      // SAVE LINE CONFIG
-      // =========================
+      await remove(ref(database, `Lines/${lineId}`));
 
-      await set(ref(database, `Lines/${line}`), {
-        machineId,
-        productCode,
-        plannedMembers,
-        hourlyTarget,
+      // REMOVE ASSIGNMENT
+
+      await remove(ref(database, `Assignments/${lineId}`));
+
+      // REMOVE MACHINE ASSIGNMENT
+
+      await update(ref(database, `Machines/${machineId}`), {
+        assignedLine: null,
       });
 
-      // =========================
-      // ASSIGNMENT HISTORY
-      // =========================
+      // RESET MACHINE
 
-      const now = new Date();
+      await update(ref(database, `Machines/${machineId}/Control`), {
+        ResetCommand: true,
+      });
 
-      const timestamp =
-        `${now.getFullYear()}-` +
-        `${String(
-          now.getMonth() + 1
-        ).padStart(2, "0")}-` +
-        `${String(now.getDate()).padStart(
-          2,
-          "0"
-        )}_` +
-        `${String(now.getHours()).padStart(
-          2,
-          "0"
-        )}-` +
-        `${String(now.getMinutes()).padStart(
-          2,
-          "0"
-        )}`;
-
-      // =========================
-      // SAVE CURRENT MACHINE
-      // =========================
-
-      await set(
-        ref(
-          database,
-          `Assignments/${line}/currentMachine`
-        ),
-        machineId
-      );
-
-      // =========================
-      // SAVE HISTORY
-      // =========================
-
-      await set(
-        ref(
-          database,
-          `Assignments/${line}/history/${timestamp}`
-        ),
-        machineId
-      );
-
-      // =========================
-      // SUCCESS
-      // =========================
-
-      setSuccessMessage(
-        "Production setup saved successfully!"
-      );
-
-      resetForm();
-
-      setTimeout(() => {
-        setSuccessMessage("");
-      }, 3000);
+      alert(`${lineId} cleared successfully`);
     } catch (error) {
-      console.error(error);
+      console.error("Clear Line Error:", error);
 
-      alert("Failed to save data");
-    } finally {
-      setLoading(false);
+      alert("Failed to clear line");
     }
   };
 
+  // ===========================================
+  // RENDER
+  // ===========================================
+
   return (
-    <div className="bg-white rounded-2xl shadow-xl p-8 max-w-2xl mx-auto border border-gray-200">
-      {/* HEADER */}
-      <div className="flex items-center gap-3 mb-8">
-        <div className="bg-blue-100 p-3 rounded-xl">
-          <Factory className="text-blue-600" />
-        </div>
+    <div className="space-y-8">
+      {/* =================================== */}
+      {/* FLOOR SELECT */}
+      {/* =================================== */}
 
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">
-            Production Setup
-          </h2>
+      <div className="bg-white rounded-3xl border border-gray-200 p-6">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">
+          Supervisor Controls
+        </h2>
 
-          <p className="text-gray-500 text-sm">
-            Configure production line settings
-          </p>
-        </div>
-      </div>
-
-      {/* SUCCESS */}
-      {successMessage && (
-        <div className="bg-green-100 text-green-700 p-3 rounded-lg mb-5">
-          {successMessage}
-        </div>
-      )}
-
-      {/* FORM */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* LINE */}
-        <div>
-          <label className="block mb-2 text-sm font-semibold text-gray-700">
-            Production Line
-          </label>
-
-          <LineSelector
-            value={line}
-            onChange={setLine}
-          />
-        </div>
-
-        {/* MACHINE */}
-        <div>
-          <label className="block mb-2 text-sm font-semibold text-gray-700">
-            Machine
-          </label>
-
-          <div className="relative">
-            <Cpu
-              className="absolute left-3 top-3 text-gray-400 z-10"
-              size={18}
-            />
-
-            <div className="pl-8">
-              <MachineSelector
-                value={machineId}
-                onChange={setMachineId}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* PRODUCT CODE */}
-        <div>
-          <label className="block mb-2 text-sm font-semibold text-gray-700">
-            Product Code
-          </label>
-
-          <div className="relative">
-            <Package
-              className="absolute left-3 top-3 text-gray-400"
-              size={18}
-            />
-
-            <input
-              type="text"
-              placeholder="032-10-126U"
-              value={productCode}
-              onChange={(e) =>
-                setProductCode(e.target.value)
-              }
-              className="border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none p-3 pl-10 rounded-lg w-full"
-            />
-          </div>
-        </div>
-
-        {/* MEMBERS */}
-        <div>
-          <label className="block mb-2 text-sm font-semibold text-gray-700">
-            Planned Members
-          </label>
-
-          <div className="relative">
-            <Users
-              className="absolute left-3 top-3 text-gray-400"
-              size={18}
-            />
-
-            <input
-              type="number"
-              placeholder="8"
-              value={plannedMembers}
-              onChange={(e) =>
-                setPlannedMembers(
-                  Number(e.target.value)
-                )
-              }
-              className="border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none p-3 pl-10 rounded-lg w-full"
-            />
-          </div>
-        </div>
-
-        {/* TARGET */}
-        <div>
-          <label className="block mb-2 text-sm font-semibold text-gray-700">
-            Hourly Target
-          </label>
-
-          <div className="relative">
-            <Target
-              className="absolute left-3 top-3 text-gray-400"
-              size={18}
-            />
-
-            <input
-              type="number"
-              placeholder="120"
-              value={hourlyTarget}
-              onChange={(e) =>
-                setHourlyTarget(
-                  Number(e.target.value)
-                )
-              }
-              className="border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none p-3 pl-10 rounded-lg w-full"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* BUTTON */}
-      <div className="mt-8">
-        <button
-          onClick={handleSave}
-          disabled={loading}
-          className="bg-blue-600 hover:bg-blue-700 transition-all duration-200 text-white px-5 py-3 rounded-xl flex items-center justify-center gap-2 w-full font-semibold disabled:opacity-50"
+        <select
+          value={selectedFloor}
+          onChange={(e) => setSelectedFloor(e.target.value)}
+          className="
+            border
+            border-gray-300
+            rounded-2xl
+            px-4
+            py-3
+            w-full
+            md:w-80
+          "
         >
-          <Save size={18} />
+          <option value="Manufacturing_Floor">Manufacturing Floor</option>
 
-          {loading
-            ? "Saving..."
-            : "Save Production Setup"}
-        </button>
+          <option value="Assembly_Floor">Assembly Floor</option>
+        </select>
       </div>
+
+      {/* =================================== */}
+      {/* CURRENT ASSIGNMENTS */}
+      {/* =================================== */}
+
+      <div className="bg-white rounded-3xl border border-gray-200 p-6">
+        <h2 className="text-xl font-bold text-gray-800 mb-5">
+          Current Assignments
+        </h2>
+
+        <div className="space-y-4">
+          {Object.entries(lines).length === 0 && (
+            <div className="text-gray-500 text-sm">No active assignments</div>
+          )}
+
+          {Object.entries(lines).map(([lineId, line]) => (
+            <div
+              key={lineId}
+              className="
+                  border
+                  border-gray-200
+                  rounded-2xl
+                  p-4
+                  flex
+                  items-center
+                  justify-between
+                "
+            >
+              <div>
+                <p className="font-bold text-gray-800">{lineId}</p>
+
+                <p className="text-sm text-gray-500 mt-1">
+                  Machine: {line.machineId}
+                  {" | Product: "}
+                  {line.productCode}
+                </p>
+
+                <p className="text-sm text-blue-600 mt-1">
+                  Current Count: {liveCounts[line.machineId] || 0}
+                </p>
+              </div>
+
+              <button
+                onClick={() => handleClearLine(lineId, line.machineId)}
+                className="
+                    bg-red-500
+                    hover:bg-red-600
+                    text-white
+                    px-4
+                    py-2
+                    rounded-xl
+                    text-sm
+                    font-medium
+                  "
+              >
+                Clear Assignment
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* =================================== */}
+      {/* RESET PANEL */}
+      {/* =================================== */}
+
+      <ResetCountPanel lines={lines} liveCounts={liveCounts} />
+
+      {/* =================================== */}
+      {/* MAINTENANCE PANEL */}
+      {/* =================================== */}
+
+      <MaintenanceAlertPanel lines={lines} />
+
+      {/* =================================== */}
+      {/* EMERGENCY PANEL */}
+      {/* =================================== */}
+
+      <EmergencyReassignmentPanel lines={lines} />
     </div>
   );
 }

@@ -40,11 +40,8 @@ export default function RealtimeLineCard({
   const averageInterval =
     chartData.length > 0
       ? (
-          chartData.reduce(
-            (sum, item) =>
-              sum + item.interval,
-            0
-          ) / chartData.length
+          chartData.reduce((sum, item) => sum + item.interval, 0) /
+          chartData.length
         ).toFixed(1)
       : "0";
 
@@ -52,13 +49,7 @@ export default function RealtimeLineCard({
   // EFFICIENCY
   // =========================
 
-  const efficiency =
-    target > 0
-      ? (
-          (current / target) *
-          100
-        ).toFixed(0)
-      : "0";
+  const efficiency = target > 0 ? ((current / target) * 100).toFixed(0) : "0";
 
   return (
     <div className="bg-white rounded-3xl shadow-xl border border-gray-200 overflow-hidden">
@@ -69,20 +60,14 @@ export default function RealtimeLineCard({
       <div className="bg-[#111827] text-white p-5">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold">
-              {line}
-            </h2>
+            <h2 className="text-2xl font-bold">{line}</h2>
 
-            <p className="text-gray-300 text-sm">
-              {product}
-            </p>
+            <p className="text-gray-300 text-sm">{product}</p>
           </div>
 
           <div
             className={`px-3 py-1 rounded-full text-sm font-semibold ${
-              status === "online"
-                ? "bg-green-500"
-                : "bg-red-500"
+              status === "online" ? "bg-green-500" : "bg-red-500"
             }`}
           >
             {status}
@@ -101,45 +86,31 @@ export default function RealtimeLineCard({
           {/* MACHINE */}
 
           <div className="bg-gray-100 rounded-2xl p-4">
-            <p className="text-gray-500 text-sm">
-              Machine
-            </p>
+            <p className="text-gray-500 text-sm">Machine</p>
 
-            <h3 className="text-lg font-bold text-gray-800">
-              {machine}
-            </h3>
+            <h3 className="text-lg font-bold text-gray-800">{machine}</h3>
           </div>
 
           {/* OUTPUT */}
 
           <div className="bg-gray-100 rounded-2xl p-4">
-            <p className="text-gray-500 text-sm">
-              Output
-            </p>
+            <p className="text-gray-500 text-sm">Output</p>
 
-            <h3 className="text-2xl font-bold text-blue-600">
-              {current}
-            </h3>
+            <h3 className="text-2xl font-bold text-blue-600">{current}</h3>
           </div>
 
           {/* TARGET */}
 
           <div className="bg-gray-100 rounded-2xl p-4">
-            <p className="text-gray-500 text-sm">
-              Target
-            </p>
+            <p className="text-gray-500 text-sm">Target</p>
 
-            <h3 className="text-2xl font-bold text-green-600">
-              {target}
-            </h3>
+            <h3 className="text-2xl font-bold text-green-600">{target}</h3>
           </div>
 
           {/* AVG INTERVAL */}
 
           <div className="bg-gray-100 rounded-2xl p-4">
-            <p className="text-gray-500 text-sm">
-              Avg Cycle Time
-            </p>
+            <p className="text-gray-500 text-sm">Avg Cycle Time</p>
 
             <h3 className="text-2xl font-bold text-orange-600">
               {averageInterval}s
@@ -153,23 +124,16 @@ export default function RealtimeLineCard({
 
         <div className="mb-6">
           <div className="flex justify-between mb-2">
-            <span className="text-sm text-gray-500">
-              Efficiency
-            </span>
+            <span className="text-sm text-gray-500">Efficiency</span>
 
-            <span className="font-semibold">
-              {efficiency}%
-            </span>
+            <span className="font-semibold">{efficiency}%</span>
           </div>
 
           <div className="w-full h-4 bg-gray-200 rounded-full overflow-hidden">
             <div
               className="h-4 bg-green-500 rounded-full transition-all duration-500"
               style={{
-                width: `${Math.min(
-                  Number(efficiency),
-                  100
-                )}%`,
+                width: `${Math.min(Number(efficiency), 100)}%`,
               }}
             ></div>
           </div>
@@ -183,10 +147,10 @@ export default function RealtimeLineCard({
           <ResponsiveContainer
             width="100%"
             height="100%"
+            minWidth={0}
+            minHeight={0}
           >
-            <LineChart
-              data={chartData}
-            >
+            <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" />
 
               <XAxis dataKey="time" />
@@ -204,8 +168,6 @@ export default function RealtimeLineCard({
             </LineChart>
           </ResponsiveContainer>
         </div>
-
-
       </div>
     </div>
   );
