@@ -2,6 +2,15 @@ import { useEffect, useState } from "react";
 
 import { ref, onValue, remove, update } from "firebase/database";
 
+import {
+  LayoutDashboard,
+  Settings,
+  RotateCcw,
+  Wrench,
+  AlertTriangle,
+  Database,
+} from "lucide-react";
+
 import { database } from "../../services/firebase";
 
 import ResetCountPanel from "./ResetCountPanel";
@@ -10,7 +19,78 @@ import MaintenanceAlertPanel from "./MaintenanceAlertPanel";
 
 import EmergencyReassignmentPanel from "./EmergencyReassignmentPanel";
 
+import LineAssignmentPanel from "./LineAssignmentPanel";
+
+import ProductionDataPanel from "./ProductionDataPanel";
+
 import type { LineData } from "../../types/production";
+
+// ===============================================
+// PANEL TYPES
+// ===============================================
+
+type PanelType =
+  | "dashboard"
+  | "assignment"
+  | "reset"
+  | "maintenance"
+  | "emergency"
+  | "database";
+
+// ===============================================
+// NAV BUTTON TYPES
+// ===============================================
+
+interface NavButtonProps {
+  label: string;
+
+  icon: React.ReactNode;
+
+  panel: PanelType;
+
+  activePanel: PanelType;
+
+  onClick: (panel: PanelType) => void;
+}
+
+// ===============================================
+// NAV BUTTON
+// ===============================================
+
+function NavButton({
+  label,
+  icon,
+  panel,
+  activePanel,
+  onClick,
+}: NavButtonProps) {
+  return (
+    <button
+      onClick={() => onClick(panel)}
+      className={`
+        flex
+        items-center
+        gap-2
+        px-5
+        py-3
+        rounded-2xl
+        transition-all
+        font-medium
+        text-sm
+
+        ${
+          activePanel === panel
+            ? "bg-blue-600 text-white shadow-lg"
+            : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+        }
+      `}
+    >
+      {icon}
+
+      {label}
+    </button>
+  );
+}
 
 // ===============================================
 // COMPONENT
@@ -21,69 +101,49 @@ export default function SupervisorForm() {
   // STATES
   // ===========================================
 
-  const [selectedFloor, setSelectedFloor] = useState("Manufacturing_Floor");
+  const [activePanel, setActivePanel] = useState<PanelType>("dashboard");
 
   const [lines, setLines] = useState<Record<string, LineData>>({});
 
   const [liveCounts, setLiveCounts] = useState<Record<string, number>>({});
 
   // ===========================================
-  // LOAD DATA
+  // LOAD FIREBASE DATA
   // ===========================================
 
   useEffect(() => {
-    // =======================================
-    // LOAD LINES
-    // =======================================
-
     const linesRef = ref(database, "Lines");
 
-    const unsubscribeLines = onValue(
-      linesRef,
-
-      (snapshot) => {
-        if (snapshot.exists()) {
-          setLines(snapshot.val() as Record<string, LineData>);
-        } else {
-          setLines({});
-        }
-      },
-    );
-
-    // =======================================
-    // LOAD MACHINES
-    // =======================================
+    const unsubscribeLines = onValue(linesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setLines(snapshot.val() as Record<string, LineData>);
+      } else {
+        setLines({});
+      }
+    });
 
     const machinesRef = ref(database, "Machines");
 
-    const unsubscribeMachines = onValue(
-      machinesRef,
+    const unsubscribeMachines = onValue(machinesRef, (snapshot) => {
+      const counts: Record<string, number> = {};
 
-      (snapshot) => {
-        const counts: Record<string, number> = {};
+      if (snapshot.exists()) {
+        const machines = snapshot.val() as Record<
+          string,
+          {
+            LiveStatus?: {
+              Count?: number;
+            };
+          }
+        >;
 
-        if (snapshot.exists()) {
-          const machines = snapshot.val() as Record<
-            string,
-            {
-              LiveStatus?: {
-                Count?: number;
-              };
-            }
-          >;
+        Object.entries(machines).forEach(([machineKey, machine]) => {
+          counts[machineKey] = Number(machine?.LiveStatus?.Count || 0);
+        });
+      }
 
-          Object.entries(machines).forEach(([machineKey, machine]) => {
-            counts[machineKey] = Number(machine?.LiveStatus?.Count || 0);
-          });
-        }
-
-        setLiveCounts(counts);
-      },
-    );
-
-    // =======================================
-    // CLEANUP
-    // =======================================
+      setLiveCounts(counts);
+    });
 
     return () => {
       unsubscribeLines();
@@ -93,7 +153,7 @@ export default function SupervisorForm() {
   }, []);
 
   // ===========================================
-  // CLEAR LINE ASSIGNMENT
+  // CLEAR LINE
   // ===========================================
 
   const handleClearLine = async (lineId: string, machineId: string) => {
@@ -112,7 +172,7 @@ export default function SupervisorForm() {
 
       await remove(ref(database, `Assignments/${lineId}`));
 
-      // REMOVE MACHINE ASSIGNMENT
+      // CLEAR MACHINE ASSIGNMENT
 
       await update(ref(database, `Machines/${machineId}`), {
         assignedLine: null,
@@ -126,9 +186,9 @@ export default function SupervisorForm() {
 
       alert(`${lineId} cleared successfully`);
     } catch (error) {
-      console.error("Clear Line Error:", error);
+      console.error(error);
 
-      alert("Failed to clear line");
+      alert("Failed to clear assignment");
     }
   };
 
@@ -137,113 +197,195 @@ export default function SupervisorForm() {
   // ===========================================
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 w-full">
       {/* =================================== */}
-      {/* FLOOR SELECT */}
-      {/* =================================== */}
-
-      <div className="bg-white rounded-3xl border border-gray-200 p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">
-          Supervisor Controls
-        </h2>
-
-        <select
-          value={selectedFloor}
-          onChange={(e) => setSelectedFloor(e.target.value)}
-          className="
-            border
-            border-gray-300
-            rounded-2xl
-            px-4
-            py-3
-            w-full
-            md:w-80
-          "
-        >
-          <option value="Manufacturing_Floor">Manufacturing Floor</option>
-
-          <option value="Assembly_Floor">Assembly Floor</option>
-        </select>
-      </div>
-
-      {/* =================================== */}
-      {/* CURRENT ASSIGNMENTS */}
+      {/* TOP NAVIGATION */}
       {/* =================================== */}
 
-      <div className="bg-white rounded-3xl border border-gray-200 p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-5">
-          Current Assignments
-        </h2>
+      <div
+        className="
+          bg-white
+          rounded-3xl
+          border
+          border-gray-200
+          p-4
+          shadow-sm
+        "
+      >
+        <div className="flex flex-wrap gap-3">
+          <NavButton
+            label="Dashboard"
+            panel="dashboard"
+            activePanel={activePanel}
+            onClick={setActivePanel}
+            icon={<LayoutDashboard size={18} />}
+          />
 
-        <div className="space-y-4">
-          {Object.entries(lines).length === 0 && (
-            <div className="text-gray-500 text-sm">No active assignments</div>
-          )}
+          <NavButton
+            label="Line Assignment"
+            panel="assignment"
+            activePanel={activePanel}
+            onClick={setActivePanel}
+            icon={<Settings size={18} />}
+          />
 
-          {Object.entries(lines).map(([lineId, line]) => (
-            <div
-              key={lineId}
-              className="
-                  border
-                  border-gray-200
-                  rounded-2xl
-                  p-4
-                  flex
-                  items-center
-                  justify-between
-                "
-            >
-              <div>
-                <p className="font-bold text-gray-800">{lineId}</p>
+          <NavButton
+            label="Reset Count"
+            panel="reset"
+            activePanel={activePanel}
+            onClick={setActivePanel}
+            icon={<RotateCcw size={18} />}
+          />
 
-                <p className="text-sm text-gray-500 mt-1">
-                  Machine: {line.machineId}
-                  {" | Product: "}
-                  {line.productCode}
-                </p>
+          <NavButton
+            label="Maintenance"
+            panel="maintenance"
+            activePanel={activePanel}
+            onClick={setActivePanel}
+            icon={<Wrench size={18} />}
+          />
 
-                <p className="text-sm text-blue-600 mt-1">
-                  Current Count: {liveCounts[line.machineId] || 0}
-                </p>
-              </div>
+          <NavButton
+            label="Emergency"
+            panel="emergency"
+            activePanel={activePanel}
+            onClick={setActivePanel}
+            icon={<AlertTriangle size={18} />}
+          />
 
-              <button
-                onClick={() => handleClearLine(lineId, line.machineId)}
-                className="
-                    bg-red-500
-                    hover:bg-red-600
-                    text-white
-                    px-4
-                    py-2
-                    rounded-xl
-                    text-sm
-                    font-medium
-                  "
-              >
-                Clear Assignment
-              </button>
-            </div>
-          ))}
+          <NavButton
+            label="Database"
+            panel="database"
+            activePanel={activePanel}
+            onClick={setActivePanel}
+            icon={<Database size={18} />}
+          />
         </div>
       </div>
 
       {/* =================================== */}
-      {/* RESET PANEL */}
+      {/* CONTENT */}
       {/* =================================== */}
 
-      <ResetCountPanel lines={lines} liveCounts={liveCounts} />
+      <div className="w-full">
+        {/* DASHBOARD */}
 
-      {/* =================================== */}
-      {/* MAINTENANCE PANEL */}
-      {/* =================================== */}
+        {activePanel === "dashboard" && (
+          <div
+            className="
+              bg-white
+              rounded-3xl
+              border
+              border-gray-200
+              p-6
+              shadow-sm
+            "
+          >
+            <h2
+              className="
+                text-2xl
+                font-bold
+                text-gray-800
+                mb-6
+              "
+            >
+              Current Assignments
+            </h2>
 
-      <MaintenanceAlertPanel lines={lines} />
+            <div className="space-y-4">
+              {Object.entries(lines).map(([lineId, line]) => (
+                <div
+                  key={lineId}
+                  className="
+                      border
+                      border-gray-200
+                      rounded-2xl
+                      p-5
+                      flex
+                      items-center
+                      justify-between
+                    "
+                >
+                  <div>
+                    <p
+                      className="
+                          text-xl
+                          font-bold
+                          text-gray-800
+                        "
+                    >
+                      {lineId}
+                    </p>
 
-      {/* =================================== */}
-      {/* EMERGENCY PANEL */}
-      {/* =================================== */}
+                    <p
+                      className="
+                          text-gray-500
+                          mt-2
+                        "
+                    >
+                      Machine: {line.machineId}
+                      {" | Product: "}
+                      {line.productCode}
+                    </p>
 
-      <EmergencyReassignmentPanel lines={lines} />
+                    <p
+                      className="
+                          text-blue-600
+                          font-semibold
+                          mt-2
+                        "
+                    >
+                      Count: {liveCounts[line.machineId] || 0}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => handleClearLine(lineId, line.machineId)}
+                    className="
+                        bg-red-500
+                        hover:bg-red-600
+                        text-white
+                        px-5
+                        py-3
+                        rounded-2xl
+                        font-semibold
+                        transition-all
+                      "
+                  >
+                    Clear
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ASSIGNMENT */}
+
+        {activePanel === "assignment" && <LineAssignmentPanel />}
+
+        {/* RESET */}
+
+        {activePanel === "reset" && (
+          <ResetCountPanel lines={lines} liveCounts={liveCounts} />
+        )}
+
+        {/* MAINTENANCE */}
+
+        {activePanel === "maintenance" && (
+          <MaintenanceAlertPanel lines={lines} />
+        )}
+
+        {/* EMERGENCY */}
+
+        {activePanel === "emergency" && (
+          <EmergencyReassignmentPanel lines={lines} />
+        )}
+
+        {/* DATABASE */}
+
+        {activePanel === "database" && <ProductionDataPanel />}
+      </div>
     </div>
   );
 }

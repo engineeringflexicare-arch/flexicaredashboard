@@ -1,90 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type {
-  AnalyticsFilters as AnalyticsFiltersType,
-  CounterHistoryPoint,
-  FloorName,
-  Granularity,
-  LineRecord,
-  MachineRecord,
-} from "../types/analytics";
+import { Activity, BarChart3, TrendingUp, Clock3, Factory } from "lucide-react";
 
-import { FLOORS } from "../constants/floors";
+import { ref, onValue } from "firebase/database";
 
-import {
-  listenFloorLines,
-  listenFloorMachines,
-  listenMachineHistory,
-  computeRealtimeStatus,
-} from "../services/analytics";
-
-import {
-  filterHistoryByRange,
-  calculateCycleTimeStats,
-  buildHeatmap,
-  summarizePatterns,
-} from "../utils/analyticsHelpers";
-
-import AnalyticsFilters from "../components/dashboard/analytics/AnalyticsFilters";
+import { database } from "../services/firebase";
 
 import AnalyticsMetrics from "../components/dashboard/analytics/AnalyticsMetrics";
 
-import AnalyticsCharts from "../components/dashboard/analytics/AnalyticsCharts";
+import AnalyticsFilters from "../components/dashboard/analytics/AnalyticsFilters";
 
 import AnalyticsHeatmap from "../components/dashboard/analytics/AnalyticsHeatmap";
 
-import RealtimeStatusPanel from "../components/dashboard/analytics/RealtimeStatusPanel";
+import RealtimeStatusPanel from "../components//dashboard/analytics/RealtimeStatusPanel";
+
+import type {
+  AnalyticsFilters as AnalyticsFilterType,
+  FloorName,
+  RealtimeMachineStatus,
+} from "../types/analytics";
 
 // ===============================================
-// FLOOR OPTIONS
+// TYPES
 // ===============================================
 
-const floorOptions: FloorName[] = ["Combined", ...(FLOORS as FloorName[])];
+interface LineData {
+  machineId?: string;
 
-// ===============================================
-// FORMAT DATE
-// ===============================================
+  productCode?: string;
 
-function formatDateInput(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  hourlyTarget?: number;
+
+  dailyTarget?: number;
+
+  plannedMembers?: number;
+}
+
+interface MachineData {
+  status?: string;
+
+  machineState?: string;
+
+  LiveStatus?: {
+    Count?: number;
+
+    LastCycleTime?: number;
+
+    LastUpdate?: string;
+  };
 }
 
 // ===============================================
-// DEFAULT DATES
-// ===============================================
-
-const defaultEndDate = formatDateInput(new Date());
-
-const defaultStartDate = formatDateInput(
-  new Date(Date.now() - 6 * 24 * 60 * 60 * 1000),
-);
-
-// ===============================================
-// GRANULARITY SCALE
-// ===============================================
-
-const granularityScale: Record<Granularity, number> = {
-  daily: 24,
-
-  weekly: 24 * 7,
-
-  monthly: 24 * 30,
-};
-
-// ===============================================
-// LINE META
-// ===============================================
-
-interface LineMeta extends LineRecord {
-  key: string;
-
-  floor: FloorName;
-
-  label: string;
-}
-
-// ===============================================
-// ANALYTICS PAGE
+// COMPONENT
 // ===============================================
 
 export default function Analytics() {
@@ -92,72 +59,44 @@ export default function Analytics() {
   // STATES
   // ===========================================
 
-  const [filters, setFilters] = useState<AnalyticsFiltersType>({
+  const [lines, setLines] = useState<Record<string, LineData>>({});
+
+  const [machines, setMachines] = useState<Record<string, MachineData>>({});
+
+  const [filters, setFilters] = useState<AnalyticsFilterType>({
     floor: "Combined",
 
-    startDate: defaultStartDate,
+    startDate: "",
 
-    endDate: defaultEndDate,
+    endDate: "",
 
     granularity: "daily",
   });
 
-  const [,] = useState<string | null>(null);
-
-  const [,] = useState<string | null>(null);
-
-  const [linesByFloor, setLinesByFloor] = useState<
-    Record<FloorName, Record<string, LineRecord>>
-  >({
-    Combined: {},
-
-    Manufacturing_Floor: {},
-
-    Assembly_Floor: {},
-  });
-
-  const [machinesByFloor, setMachinesByFloor] = useState<
-    Record<FloorName, Record<string, MachineRecord>>
-  >({
-    Combined: {},
-
-    Manufacturing_Floor: {},
-
-    Assembly_Floor: {},
-  });
-
-  const [historyByMachine, setHistoryByMachine] = useState<
-    Record<string, CounterHistoryPoint[]>
-  >({});
-
   // ===========================================
-  // LISTEN LINES
+  // LOAD FIREBASE
   // ===========================================
 
   useEffect(() => {
-    const unsubscribeLines = listenFloorLines(
-      (lines: Record<string, LineRecord>) => {
-        setLinesByFloor({
-          Combined: lines,
+    const linesRef = ref(database, "Lines");
 
-          Manufacturing_Floor: lines,
+    const machinesRef = ref(database, "Machines");
 
-          Assembly_Floor: lines,
-        });
-      },
-    );
+    const unsubscribeLines = onValue(linesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setLines(snapshot.val());
+      } else {
+        setLines({});
+      }
+    });
 
-    const unsubscribeMachines = listenFloorMachines(
-      (machines: Record<string, MachineRecord>) => {
-        setMachinesByFloor({
-          Combined: machines,
-
-          Manufacturing_Floor: machines,
-
-          Assembly_Floor: machines,
-        });
-      },
-    );
+    const unsubscribeMachines = onValue(machinesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setMachines(snapshot.val());
+      } else {
+        setMachines({});
+      }
+    });
 
     return () => {
       unsubscribeLines();
@@ -167,328 +106,452 @@ export default function Analytics() {
   }, []);
 
   // ===========================================
-  // NORMALIZED LINES
-  // ===========================================
-
-  const normalizedLines = useMemo<LineMeta[]>(() => {
-    const build = (
-      floor: FloorName,
-
-      lines: Record<string, LineRecord>,
-    ) =>
-      Object.entries(lines).map(([lineKey, line]) => ({
-        ...line,
-
-        key: `${floor}/${lineKey}`,
-
-        floor,
-
-        label: `${floor.replace("_", " ")} ${lineKey.replace("_", " ")}`,
-      }));
-
-    if (filters.floor === "Combined") {
-      return [
-        ...build("Manufacturing_Floor", linesByFloor.Manufacturing_Floor),
-
-        ...build("Assembly_Floor", linesByFloor.Assembly_Floor),
-      ];
-    }
-
-    return build(
-      filters.floor,
-
-      linesByFloor[filters.floor],
-    );
-  }, [filters.floor, linesByFloor]);
-
-  // ===========================================
-  // OPTIONS
-  // ===========================================
-
-  const lineOptions = useMemo(
-    () =>
-      normalizedLines.map((line) => ({
-        value: line.key,
-
-        label: line.label,
-      })),
-
-    [normalizedLines],
-  );
-
-  const machineOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(normalizedLines.map((line) => line.machineId).sort()),
-      ).map((machineId) => ({
-        value: machineId,
-
-        label: machineId,
-      })),
-
-    [normalizedLines],
-  );
-
-  const productOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          normalizedLines.map((line) => line.productCode).filter(Boolean),
-        ),
-      ).map((product) => ({
-        value: product,
-
-        label: product,
-      })),
-
-    [normalizedLines],
-  );
-
-  // ===========================================
-  // SELECTED LINE
-  // ===========================================
-
-  // ===========================================
-  // COMBINED DATA
-  // ===========================================
-
-  const combinedLineRecords = useMemo(
-    () => ({
-      ...linesByFloor.Manufacturing_Floor,
-
-      ...linesByFloor.Assembly_Floor,
-    }),
-
-    [linesByFloor],
-  );
-
-  const combinedMachineRecords = useMemo(
-    () => ({
-      ...machinesByFloor.Manufacturing_Floor,
-
-      ...machinesByFloor.Assembly_Floor,
-    }),
-
-    [machinesByFloor],
-  );
-
-  // ===========================================
-  // MACHINE LISTENERS
-  // ===========================================
-
-  const machineHistoryListeners = useMemo(
-    () =>
-      normalizedLines.map((line) => ({
-        floor: line.floor,
-
-        machineId: line.machineId,
-      })),
-
-    [normalizedLines],
-  );
-
-  // ===========================================
-  // MACHINE HISTORY
-  // ===========================================
-
-  useEffect(() => {
-    const unsubscribes: (() => void)[] = [];
-
-    machineHistoryListeners.forEach((entry) => {
-      const historyKey = `${entry.floor}/${entry.machineId}`;
-
-      const unsubscribe = listenMachineHistory(
-        entry.machineId,
-
-        (history: Record<string, CounterHistoryPoint>) => {
-          setHistoryByMachine((prev) => ({
-            ...prev,
-
-            [historyKey]: (
-              Object.values(history) as CounterHistoryPoint[]
-            ).sort((a, b) => a.timestamp - b.timestamp),
-          }));
-        },
-      );
-
-      unsubscribes.push(unsubscribe);
-    });
-
-    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
-  }, [machineHistoryListeners]);
-
-  // ===========================================
-  // FILTERED HISTORY
-  // ===========================================
-
-  const selectedRangeHistory = useMemo(() => {
-    const startTime = new Date(filters.startDate).setHours(0, 0, 0, 0);
-
-    const endTime = new Date(filters.endDate).setHours(23, 59, 59, 999);
-
-    return Object.entries(historyByMachine).flatMap(([historyKey, history]) => {
-      const line = normalizedLines.find(
-        (line) => `${line.floor}/${line.machineId}` === historyKey,
-      );
-
-      if (!line) {
-        return [];
-      }
-
-      if (filters.line && line.key !== filters.line) {
-        return [];
-      }
-
-      if (filters.machine && line.machineId !== filters.machine) {
-        return [];
-      }
-
-      if (filters.product && line.productCode !== filters.product) {
-        return [];
-      }
-
-      return filterHistoryByRange(history, startTime, endTime);
-    });
-  }, [filters, historyByMachine, normalizedLines]);
-
-  // ===========================================
   // REALTIME STATUS
   // ===========================================
 
-  const machineStatuses = computeRealtimeStatus(
-    filters.floor === "Combined"
-      ? combinedMachineRecords
-      : machinesByFloor[filters.floor],
+  const realtimeStatuses: RealtimeMachineStatus[] = useMemo(() => {
+    return Object.entries(lines).map(([lineKey, line]) => {
+      const machine = machines[line.machineId || ""];
 
-    filters.floor === "Combined"
-      ? combinedLineRecords
-      : linesByFloor[filters.floor],
+      // =====================================
+      // LAST UPDATE CHECK
+      // =====================================
+
+      const lastUpdate = machine?.LiveStatus?.LastUpdate;
+
+      let isOnline = false;
+
+      if (lastUpdate) {
+        const lastTime = new Date(lastUpdate).getTime();
+
+        // eslint-disable-next-line react-hooks/purity
+        const now = Date.now();
+
+        // 30 seconds timeout
+
+        isOnline = now - lastTime < 30000;
+      }
+
+      return {
+        lineKey,
+
+        machineId: line.machineId || "N/A",
+
+        currentCount: Number(machine?.LiveStatus?.Count || 0),
+
+        lastCycleTimeSec: Number(machine?.LiveStatus?.LastCycleTime || 0),
+
+        status: isOnline ? "online" : "offline",
+      };
+    });
+  }, [lines, machines]);
+  // ===========================================
+  // METRICS
+  // ===========================================
+
+  const totalOutput = realtimeStatuses.reduce(
+    (sum, item) => sum + item.currentCount,
+    0,
   );
 
-  // ===========================================
-  // ANALYTICS
-  // ===========================================
-
-  const cycleStats = calculateCycleTimeStats(selectedRangeHistory);
-
-  const hourlyIntensity = buildHeatmap(selectedRangeHistory);
-
-  const patternSummary = summarizePatterns(selectedRangeHistory);
-
-  const lineComparisonData = normalizedLines.map((line) => ({
-    label: line.label,
-
-    actual: selectedRangeHistory
-      .filter((item) => item.machineId === line.machineId)
-      .reduce((sum, item) => sum + item.count, 0),
-
-    target: line.hourlyTarget * granularityScale[filters.granularity],
-  }));
-
-  // ===========================================
-  // TOTALS
-  // ===========================================
-
-  const totalTarget =
-    normalizedLines.reduce((sum, line) => sum + line.hourlyTarget, 0) *
-    granularityScale[filters.granularity];
-
-  const totalOutput = selectedRangeHistory.reduce(
-    (sum, item) => sum + item.count,
+  const totalTarget = Object.values(lines).reduce(
+    (sum, line) => sum + Number(line.dailyTarget || 0),
     0,
   );
 
   const completionRate =
-    totalTarget > 0 ? Math.round((totalOutput / totalTarget) * 100) : 0;
+    totalTarget > 0
+      ? Number(((totalOutput / totalTarget) * 100).toFixed(0))
+      : 0;
+
+  const remaining = Math.max(totalTarget - totalOutput, 0);
+
+  const avgCycleTime =
+    realtimeStatuses.length > 0
+      ? realtimeStatuses.reduce(
+          (sum, item) => sum + (item.lastCycleTimeSec || 0),
+          0,
+        ) / realtimeStatuses.length
+      : 0;
+
+  const onlineMachines = realtimeStatuses.filter(
+    (item) => item.status === "online",
+  ).length;
+
+  const offlineMachines = realtimeStatuses.length - onlineMachines;
+
+  // ===========================================
+  // HEATMAP
+  // ===========================================
+
+  const hourlyHeatmap = [
+    { hour: "08:00", value: 40 },
+    { hour: "09:00", value: 65 },
+    { hour: "10:00", value: 82 },
+    { hour: "11:00", value: 90 },
+    { hour: "12:00", value: 35 },
+    { hour: "13:00", value: 74 },
+    { hour: "14:00", value: 98 },
+    { hour: "15:00", value: 110 },
+    { hour: "16:00", value: 76 },
+    { hour: "17:00", value: 50 },
+  ];
+
+  // ===========================================
+  // FILTER OPTIONS
+  // ===========================================
+
+  const floors: FloorName[] = [
+    "Combined",
+    "Manufacturing_Floor",
+    "Assembly_Floor",
+  ];
+
+  const lineOptions = Object.keys(lines).map((line) => ({
+    value: line,
+
+    label: line.replace("_", " "),
+  }));
+
+  const machineOptions = Object.values(lines).map((line) => ({
+    value: line.machineId || "",
+
+    label: line.machineId || "",
+  }));
+
+  const productOptions = Object.values(lines).map((line) => ({
+    value: line.productCode || "",
+
+    label: line.productCode || "",
+  }));
 
   // ===========================================
   // RENDER
   // ===========================================
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">
-          Enterprise Production Analytics
-        </h1>
+    <div className="space-y-8">
+      {/* =================================== */}
+      {/* PAGE HEADER */}
+      {/* =================================== */}
 
-        <p className="mt-2 text-gray-600">
-          Real-time production analytics dashboard
-        </p>
+      <div
+        className="
+          bg-white
+          rounded-3xl
+          border
+          border-gray-200
+          p-8
+          shadow-sm
+        "
+      >
+        <div
+          className="
+            flex
+            flex-col
+            xl:flex-row
+            xl:items-center
+            xl:justify-between
+            gap-6
+          "
+        >
+          <div className="flex items-center gap-5">
+            <div
+              className="
+                bg-blue-100
+                p-5
+                rounded-3xl
+              "
+            >
+              <BarChart3 className="text-blue-600" size={38} />
+            </div>
+
+            <div>
+              <h1
+                className="
+                  text-4xl
+                  font-black
+                  text-gray-900
+                "
+              >
+                Analytics Dashboard
+              </h1>
+
+              <p className="text-gray-500 mt-2 text-lg">
+                Real-time factory analytics and production insights
+              </p>
+            </div>
+          </div>
+
+          <div
+            className="
+              flex
+              flex-wrap
+              gap-4
+            "
+          >
+            <div
+              className="
+                bg-emerald-50
+                border
+                border-emerald-200
+                rounded-3xl
+                px-6
+                py-5
+                min-w-56
+              "
+            >
+              <div className="flex items-center gap-3">
+                <Factory className="text-emerald-600" size={24} />
+
+                <div>
+                  <p className="text-sm text-emerald-700">Factory Status</p>
+
+                  <h3
+                    className="
+                      text-2xl
+                      font-bold
+                      text-emerald-800
+                    "
+                  >
+                    Production Running
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="
+                bg-blue-50
+                border
+                border-blue-200
+                rounded-3xl
+                px-6
+                py-5
+                min-w-56
+              "
+            >
+              <div className="flex items-center gap-3">
+                <Activity className="text-blue-600" size={24} />
+
+                <div>
+                  <p className="text-sm text-blue-700">Monitoring</p>
+
+                  <h3
+                    className="
+                      text-2xl
+                      font-bold
+                      text-blue-800
+                    "
+                  >
+                    Live Analytics
+                  </h3>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* =================================== */}
+      {/* FILTERS */}
+      {/* =================================== */}
 
       <AnalyticsFilters
         filters={filters}
-        floors={floorOptions}
+        floors={floors}
         lines={lineOptions}
         machines={machineOptions}
         products={productOptions}
         onFilterChange={(patch) =>
-          setFilters((current) => ({
-            ...current,
+          setFilters((prev) => ({
+            ...prev,
             ...patch,
           }))
         }
       />
 
-      <div className="mt-8">
-        <AnalyticsMetrics
-          totalOutput={totalOutput}
-          totalTarget={totalTarget}
-          completionRate={completionRate}
-          remaining={Math.max(totalTarget - totalOutput, 0)}
-          avgCycleTime={cycleStats.average}
-          onlineMachines={
-            machineStatuses.filter((status) => status.status === "online")
-              .length
-          }
-          offlineMachines={
-            machineStatuses.filter((status) => status.status === "offline")
-              .length
-          }
-        />
-      </div>
+      {/* =================================== */}
+      {/* METRICS */}
+      {/* =================================== */}
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-[2fr_1fr]">
-        <AnalyticsCharts
-          productionTrend={[]}
-          cycleTimeTrend={[]}
-          lineComparison={lineComparisonData}
-          floorContribution={[]}
-          cycleTimeDistribution={[]}
-          hourlyIntensity={hourlyIntensity}
-        />
+      <AnalyticsMetrics
+        totalOutput={totalOutput}
+        totalTarget={totalTarget}
+        completionRate={completionRate}
+        remaining={remaining}
+        avgCycleTime={avgCycleTime}
+        onlineMachines={onlineMachines}
+        offlineMachines={offlineMachines}
+      />
 
-        <RealtimeStatusPanel statuses={machineStatuses} />
-      </div>
+      {/* =================================== */}
+      {/* REALTIME STATUS PANEL */}
+      {/* =================================== */}
 
-      <div className="mt-8">
-        <AnalyticsHeatmap hourlyHeatmap={hourlyIntensity} />
-      </div>
+      <RealtimeStatusPanel statuses={realtimeStatuses} />
 
-      <div className="mt-8 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-semibold text-gray-900">
-          Production Patterns
-        </h2>
+      {/* =================================== */}
+      {/* OVERVIEW CARDS */}
+      {/* =================================== */}
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <div>
-            <p className="text-sm text-gray-500">Peak Hour</p>
+      {/* <div
+        className="
+          grid
+          gap-6
+          md:grid-cols-2
+          xl:grid-cols-3
+        "
+      >
+        {Object.entries(lines).map(([lineKey, line]) => {
+          const machine = machines[line.machineId || ""];
 
-            <p className="text-lg font-semibold">
-              {patternSummary.peakHour || "N/A"}
-            </p>
+          return (
+            <AnalyticsOverviewCard
+              key={lineKey}
+              line={lineKey.replace("_", " ")}
+              product={line.productCode || "N/A"}
+              machine={line.machineId || "N/A"}
+              output={Number(machine?.LiveStatus?.Count || 0)}
+              target={Number(line.dailyTarget || 0)}
+              status={machine?.status === "online" ? "online" : "offline"}
+              onClick={() => {}}
+            />
+          );
+        })}
+      </div> */}
+
+      {/* =================================== */}
+      {/* CHART PLACEHOLDER */}
+      {/* =================================== */}
+
+      <div
+        className="
+          grid
+          gap-6
+          xl:grid-cols-2
+        "
+      >
+        {/* PRODUCTION TREND */}
+
+        <div
+          className="
+            bg-white
+            rounded-3xl
+            border
+            border-gray-200
+            p-6
+            shadow-sm
+          "
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <TrendingUp className="text-green-600" size={24} />
+
+            <div>
+              <h2
+                className="
+                  text-2xl
+                  font-bold
+                  text-gray-900
+                "
+              >
+                Production Trend
+              </h2>
+
+              <p className="text-gray-500">Live production analytics</p>
+            </div>
           </div>
 
-          <div>
-            <p className="text-sm text-gray-500">Slow Hour</p>
+          <div
+            className="
+              h-80
+              rounded-3xl
+              border-2
+              border-dashed
+              border-gray-200
+              flex
+              items-center
+              justify-center
+            "
+          >
+            <div className="text-center">
+              <TrendingUp
+                className="
+                  mx-auto
+                  text-gray-300
+                  mb-4
+                "
+                size={60}
+              />
 
-            <p className="text-lg font-semibold">
-              {patternSummary.slowHour || "N/A"}
-            </p>
+              <p className="text-gray-500 text-lg">Production chart area</p>
+            </div>
+          </div>
+        </div>
+
+        {/* CYCLE TIME */}
+
+        <div
+          className="
+            bg-white
+            rounded-3xl
+            border
+            border-gray-200
+            p-6
+            shadow-sm
+          "
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <Clock3 className="text-orange-600" size={24} />
+
+            <div>
+              <h2
+                className="
+                  text-2xl
+                  font-bold
+                  text-gray-900
+                "
+              >
+                Cycle Time Trend
+              </h2>
+
+              <p className="text-gray-500">Machine performance analysis</p>
+            </div>
+          </div>
+
+          <div
+            className="
+              h-80
+              rounded-3xl
+              border-2
+              border-dashed
+              border-gray-200
+              flex
+              items-center
+              justify-center
+            "
+          >
+            <div className="text-center">
+              <Clock3
+                className="
+                  mx-auto
+                  text-gray-300
+                  mb-4
+                "
+                size={60}
+              />
+
+              <p className="text-gray-500 text-lg">Cycle time chart area</p>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* =================================== */}
+      {/* HEATMAP */}
+      {/* =================================== */}
+
+      <AnalyticsHeatmap hourlyHeatmap={hourlyHeatmap} />
     </div>
   );
 }

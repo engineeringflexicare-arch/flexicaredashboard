@@ -4,6 +4,7 @@ export interface CounterHistoryItem {
 }
 
 export interface LineData {
+  floor: string;
   machineId: string;
   productCode: string;
   plannedMembers: number;
