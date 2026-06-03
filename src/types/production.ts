@@ -4,6 +4,10 @@ export interface CounterHistoryItem {
 }
 
 export interface LineData {
+  supervisor: string;
+  shift: string;
+  totalProductCount: string;
+  dailyTarget: number;
   floor: string;
   machineId: string;
   productCode: string;

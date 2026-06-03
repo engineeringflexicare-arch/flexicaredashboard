@@ -1,98 +1,375 @@
-import { ShieldCheck, Factory, Activity } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import SupervisorForm from "../components/supervisor/SupervisorForm";
+import { ref, onValue } from "firebase/database";
+
+import { database } from "../services/firebase";
+
+import ResetCountPanel from "../components/supervisor/ResetCountPanel";
+
+import MaintenanceAlertPanel from "../components/supervisor/MaintenanceAlertPanel";
+
+import EmergencyReassignmentPanel from "../components/supervisor/EmergencyReassignmentPanel";
+
+import LineAssignmentPanel from "../components/supervisor/LineAssignmentPanel";
+
+import LineAssignmentRemovePanel from "../components/supervisor/LineAssignmentRemovePanel";
+
+import type { LineData } from "../types/production";
 
 // ===============================================
-// SUPERVISOR PAGE
+// COMPONENT
 // ===============================================
 
 export default function Supervisor() {
+  // ===========================================
+  // STATES
+  // ===========================================
+
+  const [selectedFloor, setSelectedFloor] = useState("Manufacturing_Floor");
+
+  const [lines, setLines] = useState<Record<string, LineData>>({});
+
+  const [liveCounts, setLiveCounts] = useState<Record<string, number>>({});
+
+  const [activePanel, setActivePanel] = useState("assignment");
+
+  // ===========================================
+  // LOAD DATA
+  // ===========================================
+
+  useEffect(() => {
+    // =======================================
+    // LOAD LINES
+    // =======================================
+
+    const linesRef = ref(database, "Lines");
+
+    const unsubscribeLines = onValue(
+      linesRef,
+
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setLines(snapshot.val() as Record<string, LineData>);
+        } else {
+          setLines({});
+        }
+      },
+    );
+
+    // =======================================
+    // LOAD MACHINES
+    // =======================================
+
+    const machinesRef = ref(database, "Machines");
+
+    const unsubscribeMachines = onValue(
+      machinesRef,
+
+      (snapshot) => {
+        const counts: Record<string, number> = {};
+
+        if (snapshot.exists()) {
+          const machines = snapshot.val() as Record<
+            string,
+            {
+              LiveStatus?: {
+                Count?: number;
+              };
+            }
+          >;
+
+          Object.entries(machines).forEach(([machineKey, machine]) => {
+            counts[machineKey] = Number(machine?.LiveStatus?.Count || 0);
+          });
+        }
+
+        setLiveCounts(counts);
+      },
+    );
+
+    // =======================================
+    // CLEANUP
+    // =======================================
+
+    return () => {
+      unsubscribeLines();
+
+      unsubscribeMachines();
+    };
+  }, []);
+
+  // ===========================================
+  // RENDER
+  // ===========================================
+
   return (
-    <div className="min-h-screen bg-[#f3f4f6] p-4 md:p-6">
-      {/* ===================================== */}
-      {/* PAGE HEADER */}
-      {/* ===================================== */}
+    <div className="space-y-8">
+      {/* =================================== */}
+      {/* HEADER */}
+      {/* =================================== */}
 
-      <div className="bg-white rounded-3xl shadow-sm border border-gray-200 p-5 md:p-7 mb-6">
-        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
-          {/* LEFT SIDE */}
+      <div
+        className="
+          bg-white
+          rounded-3xl
+          border
+          border-gray-200
+          p-6
+          shadow-sm
+        "
+      >
+        <div
+          className="
+            flex
+            flex-col
+            lg:flex-row
+            lg:items-center
+            lg:justify-between
+            gap-5
+          "
+        >
+          <div>
+            <h2
+              className="
+                text-3xl
+                font-bold
+                text-gray-800
+              "
+            >
+              Supervisor Control Center
+            </h2>
 
-          <div className="flex items-start gap-4">
-            {/* ICON */}
-
-            <div className="bg-blue-100 p-4 rounded-2xl shrink-0">
-              <Factory className="text-blue-600" size={30} />
-            </div>
-
-            {/* TEXT */}
-
-            <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl md:text-4xl font-bold text-gray-800">
-                  Supervisor Panel
-                </h1>
-
-                <div className="bg-blue-50 border border-blue-200 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full">
-                  Factory Control
-                </div>
-              </div>
-
-              <p className="text-gray-500 mt-3 text-sm md:text-base leading-relaxed max-w-3xl">
-                Manage production lines, machine assignments, product targets,
-                supervisor operations, maintenance coordination, and real-time
-                factory floor activities from a centralized control panel.
-              </p>
-            </div>
+            <p className="text-gray-500 mt-2">
+              Manage production lines, maintenance, machine assignments and
+              reset operations.
+            </p>
           </div>
 
-          {/* RIGHT STATUS */}
+          {/* FLOOR SELECT */}
 
-          <div className="flex flex-col sm:flex-row gap-4">
-            {/* SYSTEM STATUS */}
+          <select
+            value={selectedFloor}
+            onChange={(e) => setSelectedFloor(e.target.value)}
+            className="
+              border
+              border-gray-300
+              rounded-2xl
+              px-4
+              py-3
+              w-full
+              md:w-80
+              bg-white
+              focus:outline-none
+              focus:ring-2
+              focus:ring-blue-200
+              focus:border-blue-500
+            "
+          >
+            <option value="Manufacturing_Floor">Manufacturing Floor</option>
 
-            <div className="bg-green-100 border border-green-200 text-green-700 px-5 py-4 rounded-2xl flex items-center gap-3 min-w-55">
-              <div className="bg-green-200 p-2 rounded-xl">
-                <ShieldCheck size={22} />
-              </div>
-
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide">
-                  System Status
-                </p>
-
-                <p className="font-bold text-sm md:text-base">
-                  Production Active
-                </p>
-              </div>
-            </div>
-
-            {/* LIVE STATUS */}
-
-            <div className="bg-blue-100 border border-blue-200 text-blue-700 px-5 py-4 rounded-2xl flex items-center gap-3 min-w-55">
-              <div className="bg-blue-200 p-2 rounded-xl">
-                <Activity size={22} />
-              </div>
-
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide">
-                  Monitoring
-                </p>
-
-                <p className="font-bold text-sm md:text-base">
-                  Real-time Tracking
-                </p>
-              </div>
-            </div>
-          </div>
+            <option value="Assembly_Floor">Assembly Floor</option>
+          </select>
         </div>
       </div>
 
-      {/* ===================================== */}
-      {/* SUPERVISOR FORM */}
-      {/* ===================================== */}
+      {/* =================================== */}
+      {/* NAVIGATION */}
+      {/* =================================== */}
 
-      <div className="bg-white rounded-3xl shadow-sm border border-gray-200 p-4 md:p-6">
-        <SupervisorForm />
+      <div
+        className="
+          bg-white
+          rounded-3xl
+          border
+          border-gray-200
+          p-5
+          shadow-sm
+        "
+      >
+        <div
+          className="
+            flex
+            flex-wrap
+            gap-3
+          "
+        >
+          {/* LINE ASSIGNMENT */}
+
+          <button
+            onClick={() => setActivePanel("assignment")}
+            className={`
+              px-5
+              py-3
+              rounded-2xl
+              font-semibold
+              transition-all
+              border
+              ${
+                activePanel === "assignment"
+                  ? `
+                    bg-blue-600
+                    text-white
+                    border-blue-600
+                  `
+                  : `
+                    bg-white
+                    text-gray-700
+                    border-gray-200
+                  `
+              }
+            `}
+          >
+            Line Assignment
+          </button>
+
+          {/* REMOVE ASSIGNMENT */}
+
+          <button
+            onClick={() => setActivePanel("remove")}
+            className={`
+              px-5
+              py-3
+              rounded-2xl
+              font-semibold
+              transition-all
+              border
+              ${
+                activePanel === "remove"
+                  ? `
+                    bg-blue-600
+                    text-white
+                    border-blue-600
+                  `
+                  : `
+                    bg-white
+                    text-gray-700
+                    border-gray-200
+                  `
+              }
+            `}
+          >
+            Remove Assignment
+          </button>
+
+          {/* RESET */}
+
+          <button
+            onClick={() => setActivePanel("reset")}
+            className={`
+              px-5
+              py-3
+              rounded-2xl
+              font-semibold
+              transition-all
+              border
+              ${
+                activePanel === "reset"
+                  ? `
+                    bg-blue-600
+                    text-white
+                    border-blue-600
+                  `
+                  : `
+                    bg-white
+                    text-gray-700
+                    border-gray-200
+                  `
+              }
+            `}
+          >
+            Reset Counts
+          </button>
+
+          {/* MAINTENANCE */}
+
+          <button
+            onClick={() => setActivePanel("maintenance")}
+            className={`
+              px-5
+              py-3
+              rounded-2xl
+              font-semibold
+              transition-all
+              border
+              ${
+                activePanel === "maintenance"
+                  ? `
+                    bg-blue-600
+                    text-white
+                    border-blue-600
+                  `
+                  : `
+                    bg-white
+                    text-gray-700
+                    border-gray-200
+                  `
+              }
+            `}
+          >
+            Maintenance
+          </button>
+
+          {/* EMERGENCY */}
+
+          <button
+            onClick={() => setActivePanel("emergency")}
+            className={`
+              px-5
+              py-3
+              rounded-2xl
+              font-semibold
+              transition-all
+              border
+              ${
+                activePanel === "emergency"
+                  ? `
+                    bg-blue-600
+                    text-white
+                    border-blue-600
+                  `
+                  : `
+                    bg-white
+                    text-gray-700
+                    border-gray-200
+                  `
+              }
+            `}
+          >
+            Emergency
+          </button>
+        </div>
+      </div>
+
+      {/* =================================== */}
+      {/* ACTIVE PANEL */}
+      {/* =================================== */}
+
+      <div>
+        {/* LINE ASSIGNMENT */}
+
+        {activePanel === "assignment" && <LineAssignmentPanel />}
+
+        {/* REMOVE ASSIGNMENT */}
+
+        {activePanel === "remove" && <LineAssignmentRemovePanel />}
+
+        {/* RESET PANEL */}
+
+        {activePanel === "reset" && (
+          <ResetCountPanel lines={lines} liveCounts={liveCounts} />
+        )}
+
+        {/* MAINTENANCE */}
+
+        {activePanel === "maintenance" && (
+          <MaintenanceAlertPanel lines={lines} />
+        )}
+
+        {/* EMERGENCY */}
+
+        {activePanel === "emergency" && (
+          <EmergencyReassignmentPanel lines={lines} />
+        )}
       </div>
     </div>
   );
