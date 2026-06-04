@@ -25,16 +25,6 @@ interface LineData {
 }
 
 // ===============================================
-// MACHINE DATA TYPE
-// ===============================================
-
-interface MachineData {
-  LiveStatus?: {
-    Count?: number;
-  };
-}
-
-// ===============================================
 // DASHBOARD PAGE
 // ===============================================
 
@@ -56,7 +46,7 @@ export default function Dashboard() {
 
     const linesRef = ref(database, "Lines");
 
-    const machinesRef = ref(database, "Machines");
+    const machinesRef = ref(database);
 
     // =======================================
     // LISTEN LINES
@@ -66,9 +56,7 @@ export default function Dashboard() {
       linesRef,
 
       (snapshot) => {
-        setLines(
-          snapshot.exists() ? (snapshot.val() as Record<string, LineData>) : {},
-        );
+        setLines(snapshot.exists() ? (snapshot.val() as Record<string, LineData>) : {});
       },
     );
 
@@ -83,10 +71,12 @@ export default function Dashboard() {
         const counts: Record<string, number> = {};
 
         if (snapshot.exists()) {
-          const machines = snapshot.val() as Record<string, MachineData>;
+          const data = snapshot.val();
 
-          Object.keys(machines).forEach((machineId) => {
-            counts[machineId] = machines[machineId]?.LiveStatus?.Count || 0;
+          Object.keys(data).forEach((key) => {
+            if (key.startsWith("Machine_")) {
+              counts[key] = data[key]?.LiveStatus?.Count || 0;
+            }
           });
         }
 
@@ -129,6 +119,21 @@ export default function Dashboard() {
     0,
   );
 
+  const [currentShift, setCurrentShift] = useState("");
+
+  useEffect(() => {
+    const updateShift = () => {
+      const hour = new Date().getHours();
+
+      setCurrentShift(hour >= 8 && hour < 20 ? "Day Shift" : "Night Shift");
+    };
+
+    updateShift();
+
+    const interval = setInterval(updateShift, 60000);
+
+    return () => clearInterval(interval);
+  }, []);
   // ===========================================
   // RENDER
   // ===========================================
@@ -144,9 +149,7 @@ export default function Dashboard() {
             Production Dashboard
           </h1>
 
-          <p className="text-gray-500 mt-1">
-            Real-time production monitoring system
-          </p>
+          <p className="text-gray-500 mt-1">Real-time production monitoring system</p>
         </div>
       </div>
 
@@ -160,9 +163,7 @@ export default function Dashboard() {
             <div>
               <p className="text-gray-500 text-sm">Active Lines</p>
 
-              <h2 className="text-3xl font-bold text-gray-800 mt-2">
-                {totalLines}
-              </h2>
+              <h2 className="text-3xl font-bold text-gray-800 mt-2">{totalLines}</h2>
             </div>
 
             <div className="bg-blue-100 p-3 rounded-xl">
@@ -178,9 +179,7 @@ export default function Dashboard() {
             <div>
               <p className="text-gray-500 text-sm">Current Shift</p>
 
-              <h2 className="text-3xl font-bold text-gray-800 mt-2">
-                Day Shift
-              </h2>
+              <h2 className="text-3xl font-bold text-gray-800 mt-2">{currentShift}</h2>
             </div>
 
             <div className="bg-orange-100 p-3 rounded-xl">
@@ -196,9 +195,7 @@ export default function Dashboard() {
             <div>
               <p className="text-gray-500 text-sm">Total Target</p>
 
-              <h2 className="text-3xl font-bold text-gray-800 mt-2">
-                {totalTarget}
-              </h2>
+              <h2 className="text-3xl font-bold text-gray-800 mt-2">{totalTarget}</h2>
             </div>
 
             <div className="bg-green-100 p-3 rounded-xl">
@@ -215,9 +212,7 @@ export default function Dashboard() {
           <div>
             <p className="text-gray-500 text-sm">Total Production Output</p>
 
-            <h2 className="text-3xl font-bold text-green-600 mt-2">
-              {totalOutput}
-            </h2>
+            <h2 className="text-3xl font-bold text-green-600 mt-2">{totalOutput}</h2>
           </div>
 
           <div className="bg-green-100 p-3 rounded-xl">
@@ -230,14 +225,7 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 mb-6">
         {combinedLines.map((line) => (
-          <LineCard
-            key={line.lineKey}
-            line={line.lineKey.replace("_", " ")}
-            product={line.productCode}
-            machine={line.machineId}
-            target={line.hourlyTarget}
-            current={liveCounts[line.machineId] || 0}
-          />
+          <LineCard key={line.lineKey} line={line.lineKey.replace("_", " ")} product={line.productCode} machine={line.machineId} target={line.hourlyTarget} current={liveCounts[line.machineId] || 0} />
         ))}
       </div>
 
@@ -247,13 +235,9 @@ export default function Dashboard() {
         {/* TABLE HEADER */}
 
         <div className="bg-[#1f2937] text-white px-6 py-4">
-          <h2 className="text-xl font-semibold">
-            Hourly Production Monitoring
-          </h2>
+          <h2 className="text-xl font-semibold">Hourly Production Monitoring</h2>
 
-          <p className="text-sm text-gray-300 mt-1">
-            Real-time production tracking by line
-          </p>
+          <p className="text-sm text-gray-300 mt-1">Real-time production tracking by line</p>
         </div>
 
         {/* TABLE */}

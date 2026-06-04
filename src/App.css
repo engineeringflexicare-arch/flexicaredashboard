@@ -16,6 +16,19 @@
     outline-offset: 2px;
   }
 }
+:root {
+  --background: #fafaf9;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --text-h: #1f2937;
+
+  --accent: #2563eb;
+  --accent-bg: #eff6ff;
+  --accent-border: #93c5fd;
+
+  --social-bg: #f8fafc;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
 
 .hero {
   position: relative;

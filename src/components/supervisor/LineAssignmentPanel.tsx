@@ -16,16 +16,7 @@ interface MachineData {
 // ===============================================
 // HARDCODED LINES
 // ===============================================
-const availableLines = [
-  "Line_01",
-  "Line_02",
-  "Line_03",
-  "Line_04",
-  "Line_05",
-  "Line_06",
-  "Line_07",
-  "Line_08",
-];
+const availableLines = ["Line_01", "Line_02", "Line_03", "Line_04", "Line_05", "Line_06", "Line_07", "Line_08"];
 
 // ===============================================
 // COMPONENT
@@ -55,10 +46,9 @@ export default function LineAssignmentPanel() {
   // LOAD DATA
   // ===========================================
   useEffect(() => {
-    // =======================================
     // LOAD LINES
-    // =======================================
     const linesRef = ref(database, "Lines");
+
     const unsubscribeLines = onValue(linesRef, (snapshot) => {
       if (snapshot.exists()) {
         setLines(snapshot.val() as Record<string, LineData>);
@@ -67,27 +57,37 @@ export default function LineAssignmentPanel() {
       }
     });
 
-    // =======================================
-    // LOAD MACHINES
-    // =======================================
-    const machinesRef = ref(database, "Machines");
+    // LOAD MACHINES FROM ROOT
+    const machinesRef = ref(database);
+
     const unsubscribeMachines = onValue(machinesRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setMachines(snapshot.val() as Record<string, MachineData>);
-      } else {
+      if (!snapshot.exists()) {
         setMachines({});
+        return;
       }
+
+      const data = snapshot.val();
+
+      const machineData: Record<string, MachineData> = {};
+
+      Object.keys(data).forEach((key) => {
+        if (key.startsWith("Machine_")) {
+          machineData[key] = data[key];
+        }
+      });
+
+      setMachines(machineData);
     });
 
-    // =======================================
-    // CLEANUP
-    // =======================================
     return () => {
       unsubscribeLines();
       unsubscribeMachines();
     };
   }, []);
 
+  useEffect(() => {
+    console.log("Machines Loaded:", machines);
+  }, [machines]);
   // ===========================================
   // SAVE ASSIGNMENT
   // ===========================================
@@ -149,12 +149,8 @@ export default function LineAssignmentPanel() {
           <Factory className="text-blue-600" size={24} />
         </div>
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">
-            Line Assignment Panel
-          </h2>
-          <p className="text-sm text-gray-500">
-            Assign machines and configure production lines
-          </p>
+          <h2 className="text-2xl font-bold text-gray-800">Line Assignment Panel</h2>
+          <p className="text-sm text-gray-500">Assign machines and configure production lines</p>
         </div>
       </div>
 
@@ -169,11 +165,7 @@ export default function LineAssignmentPanel() {
             p-4
             border
             text-sm
-            ${
-              message.includes("✓")
-                ? "bg-green-100 text-green-700 border-green-200"
-                : "bg-red-100 text-red-700 border-red-200"
-            }
+            ${message.includes("✓") ? "bg-green-100 text-green-700 border-green-200" : "bg-red-100 text-red-700 border-red-200"}
           `}
         >
           {message}
@@ -186,9 +178,7 @@ export default function LineAssignmentPanel() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* LINE */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Production Line
-          </label>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Production Line</label>
           <select
             value={selectedLine}
             onChange={(e) => {
@@ -221,14 +211,8 @@ export default function LineAssignmentPanel() {
 
         {/* FLOOR */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Floor
-          </label>
-          <select
-            value={selectedFloor}
-            onChange={(e) => setSelectedFloor(e.target.value)}
-            className="w-full border border-gray-300 rounded-2xl px-4 py-3"
-          >
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Floor</label>
+          <select value={selectedFloor} onChange={(e) => setSelectedFloor(e.target.value)} className="w-full border border-gray-300 rounded-2xl px-4 py-3">
             <option value="Manufacturing_Floor">Manufacturing Floor</option>
             <option value="Assembly_Floor">Assembly Floor</option>
           </select>
@@ -240,12 +224,9 @@ export default function LineAssignmentPanel() {
             <Cpu size={16} className="text-orange-600" />
             Machine
           </label>
-          <select
-            value={selectedMachine}
-            onChange={(e) => setSelectedMachine(e.target.value)}
-            className="w-full border border-gray-300 rounded-2xl px-4 py-3"
-          >
+          <select value={selectedMachine} onChange={(e) => setSelectedMachine(e.target.value)} className="w-full border border-gray-300 rounded-2xl px-4 py-3">
             <option value="">Select Machine</option>
+
             {Object.keys(machines).map((machineKey) => (
               <option key={machineKey} value={machineKey}>
                 {machineKey}
@@ -260,13 +241,7 @@ export default function LineAssignmentPanel() {
             <Package size={16} className="text-purple-600" />
             Product Code
           </label>
-          <input
-            type="text"
-            value={productCode}
-            onChange={(e) => setProductCode(e.target.value)}
-            placeholder="Enter product code"
-            className="w-full border border-gray-300 rounded-2xl px-4 py-3"
-          />
+          <input type="text" value={productCode} onChange={(e) => setProductCode(e.target.value)} placeholder="Enter product code" className="w-full border border-gray-300 rounded-2xl px-4 py-3" />
         </div>
 
         {/* DAILY TARGET */}
@@ -275,27 +250,13 @@ export default function LineAssignmentPanel() {
             <Target size={16} className="text-green-600" />
             Daily Target
           </label>
-          <input
-            type="number"
-            value={dailyTarget}
-            onChange={(e) => setDailyTarget(e.target.value)}
-            placeholder="Daily target"
-            className="w-full border border-gray-300 rounded-2xl px-4 py-3"
-          />
+          <input type="number" value={dailyTarget} onChange={(e) => setDailyTarget(e.target.value)} placeholder="Daily target" className="w-full border border-gray-300 rounded-2xl px-4 py-3" />
         </div>
 
         {/* HOURLY TARGET */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Hourly Target
-          </label>
-          <input
-            type="number"
-            value={hourlyTarget}
-            onChange={(e) => setHourlyTarget(e.target.value)}
-            placeholder="Hourly target"
-            className="w-full border border-gray-300 rounded-2xl px-4 py-3"
-          />
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Hourly Target</label>
+          <input type="number" value={hourlyTarget} onChange={(e) => setHourlyTarget(e.target.value)} placeholder="Hourly target" className="w-full border border-gray-300 rounded-2xl px-4 py-3" />
         </div>
 
         {/* TEAM MEMBERS */}
@@ -304,20 +265,12 @@ export default function LineAssignmentPanel() {
             <Users size={16} className="text-blue-600" />
             Team Members
           </label>
-          <input
-            type="number"
-            value={teamMembers}
-            onChange={(e) => setTeamMembers(e.target.value)}
-            placeholder="Number of members"
-            className="w-full border border-gray-300 rounded-2xl px-4 py-3"
-          />
+          <input type="number" value={teamMembers} onChange={(e) => setTeamMembers(e.target.value)} placeholder="Number of members" className="w-full border border-gray-300 rounded-2xl px-4 py-3" />
         </div>
 
         {/* TOTAL PRODUCT COUNT */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Total Product Count
-          </label>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Total Product Count</label>
           <input
             type="number"
             value={totalProductCount}
@@ -329,14 +282,8 @@ export default function LineAssignmentPanel() {
 
         {/* SHIFT */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Shift
-          </label>
-          <select
-            value={shift}
-            onChange={(e) => setShift(e.target.value)}
-            className="w-full border border-gray-300 rounded-2xl px-4 py-3"
-          >
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Shift</label>
+          <select value={shift} onChange={(e) => setShift(e.target.value)} className="w-full border border-gray-300 rounded-2xl px-4 py-3">
             <option value="Day">Day Shift</option>
             <option value="Night">Night Shift</option>
           </select>
@@ -344,16 +291,8 @@ export default function LineAssignmentPanel() {
 
         {/* SUPERVISOR */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Supervisor
-          </label>
-          <input
-            type="text"
-            value={supervisor}
-            onChange={(e) => setSupervisor(e.target.value)}
-            placeholder="Supervisor name"
-            className="w-full border border-gray-300 rounded-2xl px-4 py-3"
-          />
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Supervisor</label>
+          <input type="text" value={supervisor} onChange={(e) => setSupervisor(e.target.value)} placeholder="Supervisor name" className="w-full border border-gray-300 rounded-2xl px-4 py-3" />
         </div>
       </div>
 

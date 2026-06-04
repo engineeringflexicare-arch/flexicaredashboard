@@ -60,32 +60,25 @@ export default function Supervisor() {
     // LOAD MACHINES
     // =======================================
 
-    const machinesRef = ref(database, "Machines");
+    const machinesRef = ref(database);
 
-    const unsubscribeMachines = onValue(
-      machinesRef,
+    const unsubscribeMachines = onValue(machinesRef, (snapshot) => {
+      const counts: Record<string, number> = {};
 
-      (snapshot) => {
-        const counts: Record<string, number> = {};
+      if (snapshot.exists()) {
+        const data = snapshot.val();
 
-        if (snapshot.exists()) {
-          const machines = snapshot.val() as Record<
-            string,
-            {
-              LiveStatus?: {
-                Count?: number;
-              };
-            }
-          >;
+        Object.keys(data).forEach((key) => {
+          if (key.startsWith("Machine_")) {
+            counts[key] = Number(data[key]?.LiveStatus?.Count || 0);
+          }
+        });
+      }
 
-          Object.entries(machines).forEach(([machineKey, machine]) => {
-            counts[machineKey] = Number(machine?.LiveStatus?.Count || 0);
-          });
-        }
+      console.log("Live Counts:", counts);
 
-        setLiveCounts(counts);
-      },
-    );
+      setLiveCounts(counts);
+    });
 
     // =======================================
     // CLEANUP
@@ -139,10 +132,7 @@ export default function Supervisor() {
               Supervisor Control Center
             </h2>
 
-            <p className="text-gray-500 mt-2">
-              Manage production lines, maintenance, machine assignments and
-              reset operations.
-            </p>
+            <p className="text-gray-500 mt-2">Manage production lines, maintenance, machine assignments and reset operations.</p>
           </div>
 
           {/* FLOOR SELECT */}
@@ -355,21 +345,15 @@ export default function Supervisor() {
 
         {/* RESET PANEL */}
 
-        {activePanel === "reset" && (
-          <ResetCountPanel lines={lines} liveCounts={liveCounts} />
-        )}
+        {activePanel === "reset" && <ResetCountPanel lines={lines} liveCounts={liveCounts} />}
 
         {/* MAINTENANCE */}
 
-        {activePanel === "maintenance" && (
-          <MaintenanceAlertPanel lines={lines} />
-        )}
+        {activePanel === "maintenance" && <MaintenanceAlertPanel lines={lines} />}
 
         {/* EMERGENCY */}
 
-        {activePanel === "emergency" && (
-          <EmergencyReassignmentPanel lines={lines} />
-        )}
+        {activePanel === "emergency" && <EmergencyReassignmentPanel lines={lines} />}
       </div>
     </div>
   );

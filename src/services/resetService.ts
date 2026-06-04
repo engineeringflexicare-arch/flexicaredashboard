@@ -4,7 +4,6 @@ import {
   push,
   set,
   get,
-  update,
 } from "firebase/database";
 
 import {
@@ -49,17 +48,13 @@ export async function resetMachineCount(
     // SEND RESET COMMAND TO ESP
     // ===========================================
 
-    await update(
-      ref(
-        database,
-        `Machines/${input.machineId}/Control`,
-      ),
-      {
-
-        ResetCommand:
-          true,
-      },
-    );
+    await set(
+  ref(
+    database,
+    `${input.machineId}/Control/ResetCommand`,
+  ),
+  true,
+);
 
     // ===========================================
     // SAVE RESET HISTORY

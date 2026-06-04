@@ -4,46 +4,27 @@ import { ref, onValue } from "firebase/database";
 
 import { database } from "../../services/firebase";
 
-import type {
-  CounterHistoryItem,
-  TableRow,
-  LineData,
-} from "../../types/production";
+import type { CounterHistoryItem, TableRow, LineData } from "../../types/production";
 
 import HourCell from "./HourCell";
+import { hours } from "../../utils/timeHelpers";
 
-const hours = [
-  "08:00-09:00",
-  "09:00-10:00",
-  "10:00-11:00",
-  "11:00-12:00",
-  "12:00-13:00",
-  "13:00-14:00",
-  "14:00-15:00",
-  "15:00-16:00",
-  "16:00-17:00",
-  "17:00-18:00",
-  "18:00-19:00",
-  "19:00-20:00",
-];
+const dayHours = ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00"];
+
+const nightHours = ["20:00-21:00", "21:00-22:00", "22:00-23:00", "23:00-00:00", "00:00-01:00", "01:00-02:00", "02:00-03:00", "03:00-04:00", "04:00-05:00", "05:00-06:00", "06:00-07:00", "07:00-08:00"];
 
 interface ProductionTableProps {
   floor?: string;
 }
 
-export default function ProductionTable({
-  floor = "Manufacturing_Floor",
-}: ProductionTableProps) {
+export default function ProductionTable({ floor = "Assembly_Floor" }: ProductionTableProps) {
   const [rows, setRows] = useState<TableRow[]>([]);
 
   useEffect(() => {
     let latestLines: Record<string, LineData> = {};
     let latestMachines: Record<string, unknown> = {};
 
-    const updateRows = (
-      lines: Record<string, LineData>,
-      machines: Record<string, unknown>,
-    ) => {
+    const updateRows = (lines: Record<string, LineData>, machines: Record<string, unknown>) => {
       if (!lines || Object.keys(lines).length === 0) {
         setRows([]);
         return;
@@ -53,37 +34,46 @@ export default function ProductionTable({
 
       Object.entries(lines).forEach(([lineKey, line]) => {
         const machineId = line.machineId;
-        const history =
-          (machines[machineId] as Record<string, unknown>)?.CounterHistory ||
-          {};
+        const history = (machines[machineId] as Record<string, unknown>)?.CounterHistory || {};
+
+        const shiftHours = line.shift === "Night" ? nightHours : dayHours;
 
         const hourlyMap: Record<string, number> = {};
 
-        hours.forEach((hour) => {
+        shiftHours.forEach((hour) => {
           hourlyMap[hour] = 0;
         });
 
-        Object.values(history as Record<string, CounterHistoryItem>).forEach(
-          (item) => {
-            const time = item.Time;
+        Object.values(history as Record<string, CounterHistoryItem>).forEach((item) => {
+          const time = item.Time;
 
-            if (!time) return;
+          if (!time) return;
 
-            const timePart = time.split(" ")[1];
-            if (!timePart) return;
+          const timePart = time.split(" ")[1];
+          if (!timePart) return;
 
-            const hour = parseInt(timePart.split(":")[0]);
+          const hour = parseInt(timePart.split(":")[0], 10);
 
+          const isDayShift = line.shift === "Day";
+
+          if (isDayShift) {
             if (hour >= 8 && hour < 20) {
               const nextHour = hour + 1;
-              const key = `${String(hour).padStart(2, "0")}:00-${String(
-                nextHour,
-              ).padStart(2, "0")}:00`;
+
+              const key = `${String(hour).padStart(2, "0")}:00-${String(nextHour).padStart(2, "0")}:00`;
 
               hourlyMap[key] = item.Count;
             }
-          },
-        );
+          } else {
+            if (hour >= 20 || hour < 8) {
+              const nextHour = (hour + 1) % 24;
+
+              const key = `${String(hour).padStart(2, "0")}:00-${String(nextHour).padStart(2, "0")}:00`;
+
+              hourlyMap[key] = item.Count;
+            }
+          }
+        });
 
         tableRows.push({
           assemblyLine: lineKey.replace("_", " "),
@@ -97,18 +87,31 @@ export default function ProductionTable({
       setRows(tableRows);
     };
 
-    const linesRef = ref(database, `Factory/${floor}/Lines`);
-    const machinesRef = ref(database, `Factory/${floor}/Machines`);
+    const linesRef = ref(database, "Lines");
+    const machinesRef = ref(database);
 
     const unsubscribeLines = onValue(linesRef, (linesSnapshot) => {
-      latestLines = linesSnapshot.exists()
-        ? (linesSnapshot.val() as Record<string, LineData>)
-        : {};
+      latestLines = linesSnapshot.exists() ? (linesSnapshot.val() as Record<string, LineData>) : {};
       updateRows(latestLines, latestMachines);
     });
 
     const unsubscribeMachines = onValue(machinesRef, (machinesSnapshot) => {
-      latestMachines = machinesSnapshot.exists() ? machinesSnapshot.val() : {};
+      const machineData: Record<string, unknown> = {};
+
+      if (machinesSnapshot.exists()) {
+        const data = machinesSnapshot.val();
+
+        Object.keys(data).forEach((key) => {
+          if (key.startsWith("Machine_")) {
+            machineData[key] = data[key];
+          }
+        });
+      }
+
+      latestMachines = machineData;
+
+      console.log("Machines:", latestMachines);
+
       updateRows(latestLines, latestMachines);
     });
 
@@ -126,24 +129,17 @@ export default function ProductionTable({
 
       <div className="grid grid-cols-1 gap-4 md:hidden">
         {rows.map((row, index) => (
-          <div
-            key={index}
-            className="bg-white rounded-2xl shadow-lg border border-gray-200 p-4"
-          >
+          <div key={index} className="bg-white rounded-2xl shadow-lg border border-gray-200 p-4">
             {/* HEADER */}
 
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">
-                  {row.assemblyLine}
-                </h2>
+                <h2 className="text-xl font-bold text-gray-800">{row.assemblyLine}</h2>
 
                 <p className="text-sm text-gray-500">{row.productCode}</p>
               </div>
 
-              <div className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-semibold">
-                Target {row.hourlyTarget}
-              </div>
+              <div className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-semibold">Target {row.hourlyTarget}</div>
             </div>
 
             {/* MEMBERS */}
@@ -163,23 +159,10 @@ export default function ProductionTable({
                 const reached = value >= row.hourlyTarget;
 
                 return (
-                  <div
-                    key={hour}
-                    className={`rounded-xl p-3 border ${
-                      reached
-                        ? "bg-green-50 border-green-200"
-                        : "bg-red-50 border-red-200"
-                    }`}
-                  >
+                  <div key={hour} className={`rounded-xl p-3 border ${reached ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
                     <p className="text-xs text-gray-500 mb-1">{hour}</p>
 
-                    <h3
-                      className={`text-lg font-bold ${
-                        reached ? "text-green-700" : "text-red-700"
-                      }`}
-                    >
-                      {value}
-                    </h3>
+                    <h3 className={`text-lg font-bold ${reached ? "text-green-700" : "text-red-700"}`}>{value}</h3>
                   </div>
                 );
               })}
@@ -223,10 +206,7 @@ export default function ProductionTable({
               </th>
 
               {hours.map((hour) => (
-                <th
-                  key={hour}
-                  className="border border-gray-300 p-2 whitespace-nowrap"
-                >
+                <th key={hour} className="border border-gray-300 p-2 whitespace-nowrap">
                   {hour}
                 </th>
               ))}
@@ -237,42 +217,27 @@ export default function ProductionTable({
 
           <tbody>
             {rows.map((row, index) => (
-              <tr
-                key={index}
-                className="hover:bg-gray-50 transition-all duration-200"
-              >
+              <tr key={index} className="hover:bg-gray-50 transition-all duration-200">
                 {/* LINE */}
 
-                <td className="border border-gray-300 p-2 font-semibold">
-                  {row.assemblyLine}
-                </td>
+                <td className="border border-gray-300 p-2 font-semibold">{row.assemblyLine}</td>
 
                 {/* PRODUCT */}
 
-                <td className="border border-gray-300 p-2">
-                  {row.productCode}
-                </td>
+                <td className="border border-gray-300 p-2">{row.productCode}</td>
 
                 {/* MEMBERS */}
 
-                <td className="border border-gray-300 p-2">
-                  {row.plannedMembers}
-                </td>
+                <td className="border border-gray-300 p-2">{row.plannedMembers}</td>
 
                 {/* TARGET */}
 
-                <td className="border border-gray-300 p-2 font-semibold">
-                  {row.hourlyTarget}
-                </td>
+                <td className="border border-gray-300 p-2 font-semibold">{row.hourlyTarget}</td>
 
                 {/* HOURS */}
 
                 {hours.map((hour) => (
-                  <HourCell
-                    key={hour}
-                    value={row.hourlyData[hour] || 0}
-                    target={row.hourlyTarget}
-                  />
+                  <HourCell key={hour} value={row.hourlyData[hour] || 0} target={row.hourlyTarget} />
                 ))}
               </tr>
             ))}
