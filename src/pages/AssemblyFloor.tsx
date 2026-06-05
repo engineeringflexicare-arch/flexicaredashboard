@@ -757,7 +757,7 @@ export default function ProductionCharts() {
   // Firebase listeners ─────────────────────────────────────────────────────
   useEffect(() => {
     const lineRef = ref(database, "Lines/Line_01");
-    const machineRef = ref(database, "Machine_01");
+    const machineRef = ref(database, "Machines/Machine_01");
 
     const u1 = onValue(lineRef, (snap) => {
       if (snap.exists()) setLineData(snap.val());

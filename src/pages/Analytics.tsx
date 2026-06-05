@@ -598,7 +598,7 @@ export default function ProductionDashboard() {
   // Firebase real-time listeners ─────────────────────────────────────────────
   useEffect(() => {
     const lineRef: DatabaseReference = ref(database, "Lines/Line_01");
-    const machineRef: DatabaseReference = ref(database, "Machine_01");
+    const machineRef: DatabaseReference = ref(database, "Machines/Machine_01");
 
     const unsubLine = onValue(
       lineRef,

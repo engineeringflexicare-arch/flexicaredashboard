@@ -36,7 +36,13 @@ export default function ProductionTable({ floor = "Assembly_Floor" }: Production
         const machineId = line.machineId;
         const history = (machines[machineId] as Record<string, unknown>)?.CounterHistory || {};
 
-        const shiftHours = line.shift === "Night" ? nightHours : dayHours;
+        const shiftLabel = String(line.shift || "")
+          .trim()
+          .toLowerCase();
+        const isNightShift = shiftLabel.includes("night");
+        const isDayShift = shiftLabel.includes("day");
+
+        const shiftHours = isNightShift ? nightHours : dayHours;
 
         const hourlyMap: Record<string, number> = {};
 
@@ -54,22 +60,23 @@ export default function ProductionTable({ floor = "Assembly_Floor" }: Production
 
           const hour = parseInt(timePart.split(":")[0], 10);
 
-          const isDayShift = line.shift === "Day";
-
           if (isDayShift) {
             if (hour >= 8 && hour < 20) {
               const nextHour = hour + 1;
-
               const key = `${String(hour).padStart(2, "0")}:00-${String(nextHour).padStart(2, "0")}:00`;
-
+              hourlyMap[key] = item.Count;
+            }
+          } else if (isNightShift) {
+            if (hour >= 20 || hour < 8) {
+              const nextHour = (hour + 1) % 24;
+              const key = `${String(hour).padStart(2, "0")}:00-${String(nextHour).padStart(2, "0")}:00`;
               hourlyMap[key] = item.Count;
             }
           } else {
-            if (hour >= 20 || hour < 8) {
-              const nextHour = (hour + 1) % 24;
-
+            // fallback to day shift if shift is missing or unknown
+            if (hour >= 8 && hour < 20) {
+              const nextHour = hour + 1;
               const key = `${String(hour).padStart(2, "0")}:00-${String(nextHour).padStart(2, "0")}:00`;
-
               hourlyMap[key] = item.Count;
             }
           }
@@ -88,7 +95,7 @@ export default function ProductionTable({ floor = "Assembly_Floor" }: Production
     };
 
     const linesRef = ref(database, "Lines");
-    const machinesRef = ref(database);
+    const machinesRef = ref(database, "Machines");
 
     const unsubscribeLines = onValue(linesRef, (linesSnapshot) => {
       latestLines = linesSnapshot.exists() ? (linesSnapshot.val() as Record<string, LineData>) : {};
@@ -96,22 +103,7 @@ export default function ProductionTable({ floor = "Assembly_Floor" }: Production
     });
 
     const unsubscribeMachines = onValue(machinesRef, (machinesSnapshot) => {
-      const machineData: Record<string, unknown> = {};
-
-      if (machinesSnapshot.exists()) {
-        const data = machinesSnapshot.val();
-
-        Object.keys(data).forEach((key) => {
-          if (key.startsWith("Machine_")) {
-            machineData[key] = data[key];
-          }
-        });
-      }
-
-      latestMachines = machineData;
-
-      console.log("Machines:", latestMachines);
-
+      latestMachines = machinesSnapshot.exists() ? (machinesSnapshot.val() as Record<string, unknown>) : {};
       updateRows(latestLines, latestMachines);
     });
 

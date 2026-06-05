@@ -1,13 +1,8 @@
 import { LayoutDashboard, Activity, Clock3, Target } from "lucide-react";
-
 import { useEffect, useState } from "react";
-
 import { ref, onValue } from "firebase/database";
-
 import { database } from "../services/firebase";
-
 import ProductionTable from "../components/dashboard/ProductionTable";
-
 import LineCard from "../components/dashboard/LineCard";
 
 // ===============================================
@@ -16,11 +11,8 @@ import LineCard from "../components/dashboard/LineCard";
 
 interface LineData {
   machineId: string;
-
   productCode: string;
-
   plannedMembers: number;
-
   hourlyTarget: number;
 }
 
@@ -34,7 +26,6 @@ export default function Dashboard() {
   // ===========================================
 
   const [lines, setLines] = useState<Record<string, LineData>>({});
-
   const [liveCounts, setLiveCounts] = useState<Record<string, number>>({});
 
   // ===========================================
@@ -42,54 +33,39 @@ export default function Dashboard() {
   // ===========================================
 
   useEffect(() => {
-    // ESP DATABASE STRUCTURE
-
     const linesRef = ref(database, "Lines");
 
-    const machinesRef = ref(database);
-
-    // =======================================
-    // LISTEN LINES
-    // =======================================
-
-    const unsubscribeLines = onValue(
-      linesRef,
-
-      (snapshot) => {
-        setLines(snapshot.exists() ? (snapshot.val() as Record<string, LineData>) : {});
-      },
-    );
-
-    // =======================================
-    // LISTEN MACHINES
-    // =======================================
-
-    const unsubscribeMachines = onValue(
-      machinesRef,
-
-      (snapshot) => {
-        const counts: Record<string, number> = {};
-
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-
-          Object.keys(data).forEach((key) => {
-            if (key.startsWith("Machine_")) {
-              counts[key] = data[key]?.LiveStatus?.Count || 0;
-            }
-          });
-        }
-
-        setLiveCounts(counts);
-      },
-    );
+    const unsubscribeLines = onValue(linesRef, (snapshot) => {
+      setLines(snapshot.exists() ? (snapshot.val() as Record<string, LineData>) : {});
+    });
 
     return () => {
       unsubscribeLines();
-
-      unsubscribeMachines();
     };
   }, []);
+
+  useEffect(() => {
+    const unsubscribes: (() => void)[] = [];
+
+    Object.values(lines).forEach((line) => {
+      if (line.machineId) {
+        const countRef = ref(database, `Machines/${line.machineId}/LiveStatus/Count`);
+
+        const unsubscribe = onValue(countRef, (snapshot) => {
+          setLiveCounts((prev) => ({
+            ...prev,
+            [line.machineId]: snapshot.exists() ? snapshot.val() : 0,
+          }));
+        });
+
+        unsubscribes.push(unsubscribe);
+      }
+    });
+
+    return () => {
+      unsubscribes.forEach((unsub) => unsub());
+    };
+  }, [lines]);
 
   // ===========================================
   // COMBINED LINES
@@ -97,7 +73,6 @@ export default function Dashboard() {
 
   const combinedLines = Object.entries(lines).map(([lineKey, line]) => ({
     ...line,
-
     lineKey,
   }));
 
@@ -107,33 +82,24 @@ export default function Dashboard() {
 
   const totalLines = combinedLines.length;
 
-  const totalTarget = combinedLines.reduce(
-    (sum, line) => sum + line.hourlyTarget,
+  const totalTarget = combinedLines.reduce((sum, line) => sum + line.hourlyTarget, 0);
 
-    0,
-  );
-
-  const totalOutput = combinedLines.reduce(
-    (sum, line) => sum + (liveCounts[line.machineId] || 0),
-
-    0,
-  );
+  const totalOutput = combinedLines.reduce((sum, line) => sum + (liveCounts[line.machineId] || 0), 0);
 
   const [currentShift, setCurrentShift] = useState("");
 
   useEffect(() => {
     const updateShift = () => {
       const hour = new Date().getHours();
-
       setCurrentShift(hour >= 8 && hour < 20 ? "Day Shift" : "Night Shift");
     };
 
     updateShift();
-
     const interval = setInterval(updateShift, 60000);
 
     return () => clearInterval(interval);
   }, []);
+
   // ===========================================
   // RENDER
   // ===========================================
@@ -141,31 +107,25 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-[#f3f4f6] p-6">
       {/* HEADER */}
-
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
             <LayoutDashboard className="text-blue-600" />
             Production Dashboard
           </h1>
-
           <p className="text-gray-500 mt-1">Real-time production monitoring system</p>
         </div>
       </div>
 
       {/* SUMMARY */}
-
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
         {/* ACTIVE LINES */}
-
         <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-500 text-sm">Active Lines</p>
-
               <h2 className="text-3xl font-bold text-gray-800 mt-2">{totalLines}</h2>
             </div>
-
             <div className="bg-blue-100 p-3 rounded-xl">
               <Activity className="text-blue-600" />
             </div>
@@ -173,15 +133,12 @@ export default function Dashboard() {
         </div>
 
         {/* SHIFT */}
-
         <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-500 text-sm">Current Shift</p>
-
               <h2 className="text-3xl font-bold text-gray-800 mt-2">{currentShift}</h2>
             </div>
-
             <div className="bg-orange-100 p-3 rounded-xl">
               <Clock3 className="text-orange-600" />
             </div>
@@ -189,15 +146,12 @@ export default function Dashboard() {
         </div>
 
         {/* TARGET */}
-
         <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-500 text-sm">Total Target</p>
-
               <h2 className="text-3xl font-bold text-gray-800 mt-2">{totalTarget}</h2>
             </div>
-
             <div className="bg-green-100 p-3 rounded-xl">
               <Target className="text-green-600" />
             </div>
@@ -206,15 +160,12 @@ export default function Dashboard() {
       </div>
 
       {/* LIVE OUTPUT */}
-
       <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-200 mb-6">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-gray-500 text-sm">Total Production Output</p>
-
             <h2 className="text-3xl font-bold text-green-600 mt-2">{totalOutput}</h2>
           </div>
-
           <div className="bg-green-100 p-3 rounded-xl">
             <Activity className="text-green-600" />
           </div>
@@ -222,7 +173,6 @@ export default function Dashboard() {
       </div>
 
       {/* LINE CARDS */}
-
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 mb-6">
         {combinedLines.map((line) => (
           <LineCard key={line.lineKey} line={line.lineKey.replace("_", " ")} product={line.productCode} machine={line.machineId} target={line.hourlyTarget} current={liveCounts[line.machineId] || 0} />
@@ -230,18 +180,14 @@ export default function Dashboard() {
       </div>
 
       {/* TABLE */}
-
       <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
         {/* TABLE HEADER */}
-
         <div className="bg-[#1f2937] text-white px-6 py-4">
           <h2 className="text-xl font-semibold">Hourly Production Monitoring</h2>
-
           <p className="text-sm text-gray-300 mt-1">Real-time production tracking by line</p>
         </div>
 
         {/* TABLE */}
-
         <div className="p-4">
           <ProductionTable />
         </div>
